@@ -1,4 +1,26 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL;
+
+let resolvedApiBaseUrl: string | null = null;
+
+function browserBaseCandidates(): string[] {
+  if (typeof window === "undefined") return [];
+  const { protocol, hostname, origin } = window.location;
+  return [
+    `${origin}/soricall-api`,
+    "/soricall-api",
+    `${protocol}//${hostname}:8001`,
+    `${protocol}//${hostname}:8000`,
+    origin,
+    "http://localhost:8001",
+    "http://127.0.0.1:8001",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+  ];
+}
+
+function apiBaseCandidates(): string[] {
+  return [...new Set([configuredApiBaseUrl, ...browserBaseCandidates()].filter(Boolean) as string[])];
+}
 
 export type ApiHealth = {
   status: string;
@@ -45,18 +67,104 @@ export type VoiceProfile = {
   quality_score: number | null;
 };
 
+export type UserPublic = {
+  id: string;
+  email: string | null;
+  display_name: string;
+  role: string;
+};
+
+export type Family = {
+  id: string;
+  name: string;
+  created_by: string | null;
+};
+
+export type FamilyMember = {
+  id: string;
+  family_id: string;
+  name: string;
+  relation: string | null;
+  phone_number_last4: string | null;
+  is_verified: boolean;
+};
+
+export type Senior = {
+  id: string;
+  family_id: string;
+  name: string;
+  phone_number_last4: string | null;
+  birth_year: number | null;
+};
+
+export type SafeWord = {
+  id: string;
+  family_id: string;
+  hint: string | null;
+};
+
+export type FaceProfile = {
+  id: string;
+  family_member_id: string;
+  display_name: string;
+  image_ref: string | null;
+  status: string;
+  consent_accepted: boolean;
+  match_score: number | null;
+};
+
+export type VideoVerification = {
+  id: string;
+  senior_id: string;
+  family_member_id: string;
+  risk_event_id: string | null;
+  status: string;
+  match_score: number | null;
+  result: string;
+};
+
 export async function apiGet<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`);
+  const response = await requestWithFallback(path);
   return parseResponse<T>(response);
 }
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await requestWithFallback(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   return parseResponse<T>(response);
+}
+
+export function getResolvedApiBaseUrl(): string {
+  return resolvedApiBaseUrl ?? apiBaseCandidates()[0] ?? "";
+}
+
+async function requestWithFallback(path: string, init?: RequestInit): Promise<Response> {
+  let lastError: unknown = null;
+  const candidates = resolvedApiBaseUrl ? [resolvedApiBaseUrl] : apiBaseCandidates();
+
+  for (const baseUrl of candidates) {
+    try {
+      const response = await fetch(`${baseUrl}${path}`, init);
+      if (response.ok || response.status < 500) {
+        resolvedApiBaseUrl = baseUrl;
+        return response;
+      }
+      lastError = new Error(`Request failed with ${response.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  if (resolvedApiBaseUrl) {
+    resolvedApiBaseUrl = null;
+    return requestWithFallback(path, init);
+  }
+
+  if (lastError instanceof Error) throw lastError;
+  throw new Error("API server is unavailable");
 }
 
 async function parseResponse<T>(response: Response): Promise<T> {
@@ -67,4 +175,3 @@ async function parseResponse<T>(response: Response): Promise<T> {
   }
   return data as T;
 }
-

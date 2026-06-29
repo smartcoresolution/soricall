@@ -20,3 +20,20 @@ apps/web/vite.config.d.ts
 local.properties
 .idea/
 *.iml
+
+# Local operator files
+/.bash_history
+/.bash_logout
+/.bashrc
+/.cache/
+/.codex/
+/.docker/
+/.dotnet/
+/.npm/
+/.profile
+/.soricall-git/
+/.ssh/
+/.sudo_as_admin_successful
+/.vscode-server/
+/.wget-hsts
+/backups/

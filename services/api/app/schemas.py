@@ -168,6 +168,54 @@ class VoiceEnrollResponse(BaseModel):
     quality_score: int | None
 
 
+class FaceProfileCreate(BaseModel):
+    family_member_id: str
+    display_name: str = Field(min_length=1, max_length=100)
+    image_ref: str | None = None
+    consent_accepted: bool = False
+
+
+class FaceProfileUpdate(BaseModel):
+    display_name: str | None = Field(default=None, max_length=100)
+    image_ref: str | None = None
+    consent_accepted: bool | None = None
+    match_score: int | None = Field(default=None, ge=0, le=100)
+
+
+class FaceProfileResponse(BaseModel):
+    id: str
+    family_member_id: str
+    display_name: str
+    image_ref: str | None
+    status: str
+    consent_accepted: bool
+    match_score: int | None
+
+    model_config = {"from_attributes": True}
+
+
+class VideoVerificationCreate(BaseModel):
+    senior_id: str
+    family_member_id: str
+    risk_event_id: str | None = None
+
+
+class VideoVerificationAccept(BaseModel):
+    match_score: int = Field(default=88, ge=0, le=100)
+
+
+class VideoVerificationResponse(BaseModel):
+    id: str
+    senior_id: str
+    family_member_id: str
+    risk_event_id: str | None
+    status: str
+    match_score: int | None
+    result: str
+
+    model_config = {"from_attributes": True}
+
+
 class CallEvaluateRequest(BaseModel):
     senior_id: str
     phone_number: str = Field(min_length=1)

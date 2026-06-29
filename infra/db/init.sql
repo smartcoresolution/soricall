@@ -101,6 +101,19 @@ CREATE TABLE IF NOT EXISTS voice_samples (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS face_profiles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    family_member_id UUID NOT NULL REFERENCES family_members(id) ON DELETE CASCADE,
+    display_name VARCHAR(100) NOT NULL,
+    image_ref TEXT,
+    status VARCHAR(30) NOT NULL DEFAULT 'ACTIVE'
+        CHECK (status IN ('ACTIVE', 'PENDING_CONSENT', 'DELETED')),
+    consent_accepted BOOLEAN NOT NULL DEFAULT false,
+    match_score INT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS call_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     senior_id UUID NOT NULL REFERENCES seniors(id) ON DELETE CASCADE,
@@ -151,6 +164,20 @@ CREATE TABLE IF NOT EXISTS emergency_notifications (
     sent_at TIMESTAMPTZ,
     responded_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS video_verification_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    senior_id UUID NOT NULL REFERENCES seniors(id) ON DELETE CASCADE,
+    family_member_id UUID NOT NULL REFERENCES family_members(id) ON DELETE CASCADE,
+    risk_event_id UUID REFERENCES risk_events(id) ON DELETE SET NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'REQUESTED'
+        CHECK (status IN ('REQUESTED', 'ACCEPTED', 'DECLINED', 'EXPIRED')),
+    match_score INT,
+    result VARCHAR(30) NOT NULL DEFAULT 'WAITING'
+        CHECK (result IN ('WAITING', 'HIGH_MATCH', 'NEEDS_REVIEW', 'LOW_MATCH')),
+    requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    responded_at TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS audit_logs (

@@ -124,6 +124,40 @@ class VoiceSample(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class FaceProfile(Base):
+    __tablename__ = "face_profiles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    family_member_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("family_members.id", ondelete="CASCADE"),
+    )
+    display_name: Mapped[str] = mapped_column(String(100))
+    image_ref: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(30), default="ACTIVE")
+    consent_accepted: Mapped[bool] = mapped_column(Boolean, default=False)
+    match_score: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class VideoVerificationRequest(Base):
+    __tablename__ = "video_verification_requests"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    senior_id: Mapped[str] = mapped_column(String(36), ForeignKey("seniors.id", ondelete="CASCADE"))
+    family_member_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("family_members.id", ondelete="CASCADE"),
+    )
+    risk_event_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("risk_events.id"))
+    status: Mapped[str] = mapped_column(String(30), default="REQUESTED")
+    match_score: Mapped[int | None] = mapped_column(Integer)
+    result: Mapped[str] = mapped_column(String(30), default="WAITING")
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class CallEvent(Base):
     __tablename__ = "call_events"
 
