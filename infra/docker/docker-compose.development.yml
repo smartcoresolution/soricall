@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: soricall-postgres-dev
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-soricall}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-soricall_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-soricall}
+    ports:
+      - "5433:5432"
+    volumes:
+      - soricall_pg_data_dev:/var/lib/postgresql/data
+      - ../db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-soricall} -d $${POSTGRES_DB:-soricall}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ../../services/api
+      dockerfile: ../../infra/docker/api.Dockerfile
+    container_name: soricall-api-dev
+    env_file:
+      - ../../.env.development
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ai:
+        condition: service_started
+
+  ai:
+    build:
+      context: ../../services/ai
+      dockerfile: ../../infra/docker/ai.Dockerfile
+    container_name: soricall-ai-dev
+    env_file:
+      - ../../.env.development
+    ports:
+      - "8100:8100"
+
+volumes:
+  soricall_pg_data_dev:

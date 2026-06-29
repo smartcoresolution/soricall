@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SoriCall 스마트폰 Web/App 화면 — Pastel Senior Friendly Style</title>
+<style>
+  :root{
+    --paper:#F5EFD9;
+    --paper2:#FBF6E8;
+    --cream:#FFF9EC;
+    --ivory:#FFFCF4;
+    --mint:#BFDCD3;
+    --mint2:#DDEBE4;
+    --mint3:#E9F4EF;
+    --teal:#317D78;
+    --teal2:#4EAAA1;
+    --deep:#234B49;
+    --sage:#8DA989;
+    --leaf:#B9CDA7;
+    --yellow:#F3C765;
+    --orange:#E7A86D;
+    --coral:#E56460;
+    --red:#D94A46;
+    --pink:#FFE7E4;
+    --blue:#87A8C8;
+    --ink:#1F3432;
+    --muted:#6C7A76;
+    --line:#E6DCC8;
+    --shadow:0 18px 40px rgba(68,56,34,.16);
+    --soft-shadow:0 8px 20px rgba(67,57,40,.10);
+    --round:24px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans KR",Roboto,Arial,sans-serif;
+    color:var(--ink);
+    background:
+      radial-gradient(circle at 12% 8%,rgba(191,220,211,.65),transparent 26%),
+      radial-gradient(circle at 86% 3%,rgba(243,199,101,.35),transparent 24%),
+      linear-gradient(180deg,var(--paper2),var(--paper));
+  }
+  .page{
+    width:min(1280px,100%);
+    margin:0 auto;
+    padding:24px 22px 42px;
+  }
+  .hero-board{
+    position:relative;
+    min-height:210px;
+    border-radius:34px;
+    background:linear-gradient(135deg,rgba(255,252,244,.88),rgba(232,244,239,.78));
+    border:1px solid rgba(230,220,200,.9);
+    box-shadow:var(--soft-shadow);
+    padding:28px clamp(22px,4vw,48px);
+    display:grid;
+    grid-template-columns:1.15fr .85fr;
+    gap:26px;
+    overflow:hidden;
+  }
+  .hero-board::before{content:"";position:absolute;right:-48px;bottom:-72px;width:240px;height:240px;border-radius:50%;background:rgba(191,220,211,.55)}
+  .hero-board::after{content:"";position:absolute;left:-70px;top:50px;width:160px;height:160px;border-radius:50%;background:rgba(243,199,101,.20)}
+  .brand-block{position:relative;z-index:1;display:flex;gap:20px;align-items:center}
+  .logo-mark{
+    width:88px;height:88px;border-radius:30px;background:linear-gradient(145deg,var(--teal2),var(--teal));
+    display:grid;place-items:center;color:white;font-size:46px;box-shadow:0 16px 32px rgba(49,125,120,.22);
+  }
+  .brand-kor{font-size:28px;font-weight:950;letter-spacing:-.7px;color:var(--ink)}
+  .brand-name{font-size:58px;font-weight:1000;line-height:.98;letter-spacing:-1.8px;color:var(--teal);margin-top:2px}
+  .brand-sub{margin-top:10px;font-size:17px;line-height:1.55;color:#4A605D;font-weight:750}
+  .hero-copy{position:relative;z-index:1;display:flex;flex-direction:column;justify-content:center;border-left:1px solid rgba(50,87,83,.18);padding-left:30px}
+  .hero-copy h1{font-size:29px;line-height:1.28;letter-spacing:-.8px;margin:0 0 8px;color:var(--deep)}
+  .hero-copy p{font-size:16px;line-height:1.62;color:#526762;margin:0;font-weight:700}
+  .elder-illus{position:absolute;right:34px;bottom:14px;display:flex;align-items:end;gap:8px;opacity:.95}
+  .elder{width:64px;height:78px;border-radius:34px 34px 20px 20px;background:#F5B797;position:relative;box-shadow:0 8px 12px rgba(70,62,45,.08)}
+  .elder::before{content:"";position:absolute;top:-15px;left:11px;width:42px;height:42px;border-radius:50%;background:#E6E0D2;border:5px solid #FAF1DE}
+  .elder::after{content:"☺";position:absolute;top:-8px;left:23px;font-size:20px;color:#334}
+  .elder.man{background:#4F9B92}.elder.man::before{background:#D2D0C8}.elder.man::after{left:22px}
+  .layout{
+    margin-top:22px;
+    display:grid;
+    grid-template-columns:250px 1fr;
+    gap:22px;
+    align-items:start;
+  }
+  .sidebar{
+    position:sticky;top:18px;
+    border-radius:28px;
+    background:rgba(255,252,244,.78);
+    border:1px solid var(--line);
+    box-shadow:var(--soft-shadow);
+    padding:18px;
+  }
+  .sidebar h2{font-size:17px;margin:2px 0 14px;color:var(--deep)}
+  .nav{display:grid;gap:8px;max-height:58vh;overflow:auto;padding-right:4px}
+  .nav button{
+    appearance:none;border:1px solid transparent;background:#FFFDF7;color:#536764;
+    border-radius:16px;padding:11px 12px;text-align:left;font-weight:900;font-size:13.5px;cursor:pointer;
+    box-shadow:0 3px 9px rgba(79,70,47,.04);
+  }
+  .nav button:hover{border-color:#D5C9B3;background:#fff}
+  .nav button.active{background:var(--mint2);color:var(--deep);border-color:#9FC8BF}
+  .side-note{
+    margin-top:16px;padding:14px 13px;border-radius:20px;background:#E8F2EE;border:1px solid #C8DED7;
+    color:#49625E;font-size:13px;line-height:1.55;font-weight:750;
+  }
+  .workarea{display:grid;grid-template-columns:minmax(330px,440px) 1fr;gap:24px;align-items:start}
+  .phone-stage{
+    display:flex;justify-content:center;position:sticky;top:18px;
+  }
+  .phone{
+    width:390px;height:812px;border-radius:42px;background:#FFFDF7;border:1px solid rgba(96,82,48,.18);
+    padding:10px;box-shadow:var(--shadow);position:relative;overflow:hidden;
+  }
+  .phone::before{content:"";position:absolute;top:16px;left:50%;transform:translateX(-50%);width:80px;height:20px;border-radius:999px;background:#E9DECA;z-index:5;border:1px solid rgba(85,70,48,.08)}
+  .phone::after{content:"";position:absolute;inset:6px;border-radius:38px;border:1px solid rgba(255,255,255,.8);pointer-events:none}
+  .screen{
+    height:100%;border-radius:34px;overflow:hidden;position:relative;display:flex;flex-direction:column;
+    background:
+      radial-gradient(circle at 50% 3%,rgba(191,220,211,.38),transparent 32%),
+      linear-gradient(180deg,#FFFDF5,#F8F0DC);
+    border:1px solid rgba(111,96,57,.12);
+  }
+  .status{height:36px;display:flex;align-items:end;justify-content:space-between;padding:0 22px 6px;font-weight:950;font-size:12px;color:#243E3B;background:rgba(255,252,244,.65)}
+  .appbar{height:58px;padding:12px 18px;display:flex;align-items:center;justify-content:space-between;background:rgba(255,252,244,.78);border-bottom:1px solid rgba(219,208,184,.7)}
+  .app-title{font-size:18px;font-weight:1000;letter-spacing:-.4px;color:#1E3B39}
+  .iconbtn{width:34px;height:34px;border-radius:12px;border:1px solid #D9CEB8;background:#FFF9EB;color:#2B6661;display:grid;place-items:center;font-weight:1000;font-size:16px}
+  .content{padding:18px;overflow:auto;flex:1}.content::-webkit-scrollbar{width:0;height:0}
+  .bottom-nav{height:68px;border-top:1px solid #E6DCC8;display:grid;grid-template-columns:repeat(4,1fr);background:rgba(255,252,244,.92)}
+  .bottom-nav div{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:#7C8884;font-size:11px;font-weight:900}
+  .bottom-nav div.active{color:var(--teal)}
+  .soft-card,.card{
+    background:rgba(255,252,244,.94);border:1px solid #E2D6BE;border-radius:22px;padding:15px;box-shadow:0 7px 17px rgba(76,67,45,.09);margin-bottom:12px;
+  }
+  .card h3,.soft-card h3{margin:0 0 6px;color:#213F3D;font-size:17px;letter-spacing:-.3px}.card p,.soft-card p{margin:0;color:#687973;line-height:1.48;font-size:14px;font-weight:720}
+  .btn,.primary,.secondary,.danger,.ghost,.warn{
+    width:100%;height:54px;border:0;border-radius:18px;font-weight:1000;font-size:16px;letter-spacing:-.2px;margin-top:10px;cursor:pointer;
+  }
+  .primary{background:linear-gradient(145deg,#3AA89D,#2B7E78);color:#fff;box-shadow:0 10px 20px rgba(48,132,126,.23)}
+  .secondary{background:#E2EFE8;color:#2F706B;border:1px solid #BFDCD3}
+  .ghost{background:#FFFDF7;color:#314B48;border:1px solid #DFD2B8}
+  .danger{background:linear-gradient(145deg,#EB6964,#D94A46);color:white;box-shadow:0 10px 20px rgba(217,74,70,.22)}
+  .warn{background:#F7C96D;color:#57412C}
+  .pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:7px 10px;background:#E7F1ED;color:#2B6862;border:1px solid #C8DED7;font-weight:950;font-size:12px}
+  .badge{display:inline-flex;border-radius:999px;padding:5px 9px;font-size:11px;font-weight:1000;background:#E7F1ED;color:#2C716B;border:1px solid #C8DED7}
+  .badge.yellow{background:#FFF2CC;color:#8A6425;border-color:#F4D48A}.badge.red{background:#FFE1DD;color:#C94843;border-color:#F2B2AC}.badge.blue{background:#EAF0F7;color:#4B6F91;border-color:#C8D8E8}
+  .intro-logo{text-align:center;padding:12px 4px 10px}.intro-mark{width:96px;height:96px;margin:20px auto 16px;border-radius:32px;background:linear-gradient(145deg,#56B7AD,#2C7E78);display:grid;place-items:center;color:white;font-size:56px;box-shadow:0 16px 30px rgba(52,129,123,.25)}
+  .intro-logo h1{margin:0;color:var(--teal);font-size:43px;line-height:1;font-weight:1000;letter-spacing:-1.6px}.intro-logo p{font-size:15px;line-height:1.6;font-weight:760;color:#546A66;margin:12px 0 0}
+  .landscape{position:absolute;left:0;right:0;bottom:0;height:175px;background:linear-gradient(180deg,transparent 0,#E0EAD8 40%,#D0DEC2 100%);pointer-events:none}
+  .landscape::before{content:"";position:absolute;left:42px;bottom:28px;width:74px;height:56px;background:#8EC6B9;clip-path:polygon(50% 0,100% 45%,100% 100%,0 100%,0 45%);border-radius:4px;opacity:.85}
+  .landscape::after{content:"";position:absolute;right:52px;bottom:28px;width:54px;height:96px;background:#B8CDA7;border-radius:999px 999px 16px 16px;box-shadow:-82px 18px 0 -14px #C6D8B4}
+  .role-card{display:flex;align-items:center;gap:14px;background:#FFFDF7;border:1px solid #E1D4BC;border-radius:24px;padding:14px;margin-bottom:14px;box-shadow:0 8px 18px rgba(75,65,44,.09)}
+  .role-avatar,.avatar{width:70px;height:70px;flex:0 0 auto;border-radius:24px;background:#E2EFE8;display:grid;place-items:center;font-size:36px;border:1px solid #C9DED7}
+  .role-card strong{font-size:21px;color:#25413E}.role-card span{display:block;font-size:14px;line-height:1.4;color:#667872;font-weight:750;margin-top:4px}.role-card .arrow{margin-left:auto;font-size:25px;color:#3C726D}
+  .home-greeting{padding:8px 2px 12px}.home-greeting h2{margin:0;font-size:22px;line-height:1.32;color:#203D3B;letter-spacing:-.6px}.status-pill{margin-top:12px;background:#FFFDF7;border:1px solid #E2D6BE;border-radius:18px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 6px 14px rgba(80,69,45,.08);font-weight:950}.status-pill b{color:#278176;font-size:18px}
+  .tile-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}.tile{min-height:112px;border-radius:20px;background:#FFFDF7;border:1px solid #E2D6BE;box-shadow:0 7px 15px rgba(77,68,44,.08);padding:14px;display:flex;flex-direction:column;justify-content:space-between}.tile .ico{font-size:34px}.tile b{font-size:16px;color:#243F3D}
+  .family-row{display:flex;align-items:center;gap:11px;border:1px solid #E2D6BE;border-radius:18px;background:#FFFDF7;box-shadow:0 5px 12px rgba(77,68,44,.07);padding:10px;margin-bottom:10px}.small-avatar{width:48px;height:48px;border-radius:16px;display:grid;place-items:center;background:#E2EFE8;font-size:25px}.family-row strong{font-size:16px}.family-row span{display:block;margin-top:3px;font-size:12px;font-weight:750;color:#6C7A76}.row-actions{margin-left:auto;display:flex;gap:7px}.round-icon{width:32px;height:32px;border-radius:12px;border:0;background:#E4F0EC;color:#2B7E78;font-weight:900}
+  .input{height:52px;width:100%;border-radius:16px;border:1px solid #DCD0B8;background:#FFFDF7;padding:0 14px;font-size:15px;font-weight:800;color:#314B48}.label{font-size:13px;color:#264542;font-weight:950;margin:10px 0 7px;display:block}.safe-word{text-align:center;border:1px solid #ECD3A0;background:#FFF8E9;border-radius:22px;padding:18px;margin-bottom:14px}.safe-word .word{font-size:34px;font-weight:1000;color:#2F4C49;letter-spacing:-.6px;margin-top:6px}.safe-tip{background:#EDF4F2;border:1px solid #D1E4DD;border-radius:18px;padding:12px;font-size:13px;line-height:1.5;color:#55716C;font-weight:800}
+  .toggle-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 0;border-bottom:1px solid #E3D8C4}.toggle-row b{font-size:15px;color:#263F3D}.toggle-row p{margin:4px 0 0;font-size:12px;color:#71807B;font-weight:720}.switch{width:48px;height:28px;background:#DDD2BF;border-radius:999px;padding:4px;flex:0 0 auto}.switch::after{content:"";display:block;width:20px;height:20px;border-radius:50%;background:white;box-shadow:0 2px 5px rgba(0,0,0,.18)}.switch.on{background:#4AA69D}.switch.on::after{margin-left:20px}
+  .warning-top{margin:-18px -18px 18px;padding:22px 18px 18px;background:linear-gradient(180deg,#E96561,#D94A46);color:white;text-align:center}.warning-top h1{font-size:25px;margin:4px 0 0}.alert-icon{width:108px;height:92px;margin:20px auto 12px;background:#E55C58;color:white;display:grid;place-items:center;font-size:48px;clip-path:polygon(50% 0,100% 88%,0 88%);filter:drop-shadow(0 8px 12px rgba(204,74,70,.24))}.warning-title{text-align:center;font-size:24px;line-height:1.25;color:#D94A46;font-weight:1000;margin:6px 0}.danger-list{border:1px solid #F0B8B3;background:#FFF4F2;border-radius:18px;padding:13px;margin:14px 0}.danger-list div{font-size:13px;font-weight:850;line-height:1.7;color:#5B4B48}
+  .guardian-note{background:#FFFDF7;border:1px solid #E1D4BC;border-radius:22px;padding:14px;box-shadow:0 7px 15px rgba(77,68,44,.08)}.guardian-note .headline{display:flex;align-items:center;gap:8px;color:#D94A46;font-weight:1000;margin:10px 0 8px}.recommend{display:grid;gap:8px}.recommend div{background:#FFFCF4;border:1px solid #E2D6BE;border-radius:14px;padding:11px;font-size:13px;font-weight:850;color:#465B57}
+  .mic-card{text-align:center}.mic{width:132px;height:132px;margin:15px auto;border-radius:50%;background:radial-gradient(circle at 32% 28%,#8FD2C8,#2B7E78);display:grid;place-items:center;color:white;font-size:62px;box-shadow:inset 0 0 0 12px rgba(255,255,255,.38),0 12px 25px rgba(51,124,118,.20)}.wave{height:12px;border-radius:999px;background:#E2D6BE;overflow:hidden;margin:13px 0 4px}.wave i{display:block;width:62%;height:100%;background:linear-gradient(90deg,#4AA69D,#F0C067)}
+  .risk-card{background:#FFF5F1;border:1px solid #F0B8B3;border-radius:22px;padding:16px;margin-bottom:12px}.risk-card h2{margin:8px 0;font-size:24px;line-height:1.26;color:#D94A46}.risk-card p{font-size:14px;line-height:1.5;color:#67524F;font-weight:800}.metric-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}.metric{border:1px solid #E2D6BE;background:#FFFDF7;border-radius:18px;padding:12px;text-align:center}.metric strong{font-size:24px;color:#24413F}.metric span{display:block;margin-top:4px;font-size:11px;font-weight:900;color:#687973}.history-item{display:flex;gap:10px;background:#FFFDF7;border:1px solid #E2D6BE;border-radius:18px;padding:11px;margin-bottom:10px;box-shadow:0 5px 12px rgba(77,68,44,.07)}.history-item .ico{font-size:26px}.history-item strong{font-size:15px}.history-item small{display:block;color:#71807B;font-weight:760;margin-top:3px}.consent{display:flex;gap:10px;align-items:flex-start;font-size:13px;line-height:1.45;font-weight:850;color:#506662}.check{width:22px;height:22px;border-radius:8px;background:#4AA69D;color:white;display:grid;place-items:center;flex:0 0 auto}
+  .profile-banner{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+  .profile-stack{flex:1 1 auto}
+  .profile-stack .badge{margin-top:6px}
+  .family-face-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:10px 0 14px}
+  .face-card{background:#FFFDF7;border:1px solid #E2D6BE;border-radius:18px;padding:10px;text-align:center;box-shadow:0 5px 12px rgba(77,68,44,.07)}
+  .face-label{font-size:12px;font-weight:950;color:#314B48;line-height:1.35}
+  .face-sub{font-size:10px;color:#7A8782;font-weight:780;line-height:1.3;margin-top:2px}
+  .photo-strip{display:flex;gap:10px;overflow:auto;padding-bottom:2px;margin:10px 0}.photo-strip::-webkit-scrollbar{width:0;height:0}
+  .face-photo{width:64px;height:64px;margin:0 auto 8px;border-radius:22px;background:linear-gradient(145deg,#F9E3D0,#F4C6A7);border:3px solid rgba(255,255,255,.95);box-shadow:0 8px 16px rgba(77,68,44,.11);display:grid;place-items:center;font-size:29px;color:#5B4036;position:relative;overflow:hidden}
+  .face-photo.big{width:82px;height:82px;border-radius:28px;font-size:38px;margin:0}
+  .face-photo.small{width:48px;height:48px;border-radius:16px;font-size:24px;margin:0}
+  .face-photo::after{content:'사진';position:absolute;right:4px;bottom:4px;padding:2px 5px;border-radius:999px;background:rgba(255,253,247,.92);border:1px solid #E2D6BE;font-size:8px;font-weight:1000;color:#48635F}
+  .face-photo.teal{background:linear-gradient(145deg,#D7EBE3,#BFDCD3)}
+  .face-photo.blue{background:linear-gradient(145deg,#EAF0F7,#C6D9EA)}
+  .face-photo.yellow{background:linear-gradient(145deg,#FFF3CF,#F5D886)}
+  .face-action{margin-top:8px;font-size:10px;font-weight:950;color:#4B6E69}
+  .photo-tip{background:#EDF4F2;border:1px solid #D1E4DD;border-radius:16px;padding:12px;font-size:12px;line-height:1.55;color:#55716C;font-weight:800}
+  .detail-panel{
+    background:rgba(255,252,244,.74);border:1px solid var(--line);border-radius:30px;padding:22px;box-shadow:var(--soft-shadow);
+  }
+  .detail-panel h2{font-size:26px;line-height:1.28;margin:0 0 8px;color:#213F3D;letter-spacing:-.8px}.detail-panel p{font-size:15px;line-height:1.72;color:#596F6A;font-weight:720;margin:0}.spec{margin-top:17px;display:grid;grid-template-columns:124px 1fr;border-top:1px solid #E3D8C4}.spec div{padding:11px 0;border-bottom:1px solid #E3D8C4;font-size:13px}.spec div:nth-child(odd){font-weight:1000;color:#274A47}.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}.chips span{padding:7px 10px;border-radius:999px;background:#E9F3EF;border:1px solid #C8DED7;color:#376A65;font-weight:900;font-size:12px}
+  .showcase-section{margin-top:26px}.showcase-title{display:flex;align-items:end;justify-content:space-between;gap:14px;margin-bottom:16px}.showcase-title h2{font-size:27px;margin:0;color:#213F3D;letter-spacing:-.8px}.showcase-title p{margin:0;color:#667872;font-weight:750}
+  .showcase-grid{display:grid;grid-template-columns:repeat(4,minmax(210px,1fr));gap:20px}.mini-phone{height:455px;border-radius:26px;background:#FFFDF7;border:1px solid rgba(96,82,48,.18);padding:7px;box-shadow:0 14px 28px rgba(66,56,35,.12);overflow:hidden}.mini-phone .phone{width:100%;height:100%;box-shadow:none;border-radius:22px;padding:0;border:0}.mini-phone .phone::before,.mini-phone .phone::after{display:none}.mini-phone .screen{border-radius:20px}.mini-phone .status{height:24px;font-size:9px;padding:0 14px 3px}.mini-phone .appbar{height:40px;padding:7px 10px}.mini-phone .app-title{font-size:13px}.mini-phone .iconbtn{width:24px;height:24px;border-radius:8px;font-size:11px}.mini-phone .content{padding:10px}.mini-phone .bottom-nav{height:43px}.mini-phone .bottom-nav div{font-size:8px}.mini-phone .intro-mark{width:62px;height:62px;border-radius:21px;font-size:36px;margin:8px auto 10px}.mini-phone .intro-logo h1{font-size:29px}.mini-phone .intro-logo p{font-size:11px}.mini-phone .btn,.mini-phone .primary,.mini-phone .secondary,.mini-phone .danger,.mini-phone .ghost,.mini-phone .warn{height:35px;border-radius:12px;font-size:11px;margin-top:6px}.mini-phone .card,.mini-phone .soft-card{padding:9px;border-radius:14px;margin-bottom:7px}.mini-phone .card h3,.mini-phone .soft-card h3{font-size:11px}.mini-phone .card p,.mini-phone .soft-card p{font-size:9px}.mini-phone .landscape{height:80px}.mini-phone .role-card{padding:8px;border-radius:15px}.mini-phone .role-avatar,.mini-phone .avatar{width:42px;height:42px;border-radius:14px;font-size:22px}.mini-phone .role-card strong{font-size:13px}.mini-phone .role-card span{font-size:9px}.mini-phone .role-card .arrow{font-size:14px}.mini-phone .home-greeting h2{font-size:13px}.mini-phone .status-pill{padding:8px;border-radius:12px;font-size:10px}.mini-phone .status-pill b{font-size:11px}.mini-phone .tile-grid{gap:6px}.mini-phone .tile{min-height:66px;border-radius:13px;padding:8px}.mini-phone .tile .ico{font-size:18px}.mini-phone .tile b{font-size:10px}.mini-phone .family-row{gap:6px;padding:6px;border-radius:12px}.mini-phone .small-avatar{width:30px;height:30px;border-radius:10px;font-size:16px}.mini-phone .round-icon{width:22px;height:22px;border-radius:8px}.mini-phone .safe-word{padding:10px;border-radius:14px}.mini-phone .safe-word .word{font-size:19px}.mini-phone .input{height:32px;border-radius:10px;font-size:10px}.mini-phone .alert-icon{width:68px;height:58px;font-size:28px;margin:10px auto 6px}.mini-phone .warning-top{padding:12px 10px;margin:-10px -10px 9px}.mini-phone .warning-top h1{font-size:15px}.mini-phone .warning-title{font-size:15px}.mini-phone .danger-list{padding:8px;border-radius:12px}.mini-phone .danger-list div{font-size:9px}.mini-phone .guardian-note{padding:9px;border-radius:14px}.mini-phone .mic{width:76px;height:76px;font-size:35px}.mini-phone .risk-card{padding:10px;border-radius:14px}.mini-phone .risk-card h2{font-size:15px}.mini-phone .metric strong{font-size:15px}.mini-phone .history-item{padding:7px;border-radius:12px}.mini-phone .badge{font-size:8px;padding:4px 6px}
+  .mini-phone .family-face-grid{gap:5px;margin:6px 0 8px}.mini-phone .face-card{padding:6px;border-radius:10px}.mini-phone .face-photo{width:36px;height:36px;border-radius:12px;font-size:17px;margin:0 auto 5px}.mini-phone .face-photo.big{width:46px;height:46px;border-radius:15px}.mini-phone .face-photo.small{width:28px;height:28px;border-radius:10px}.mini-phone .face-label{font-size:8px}.mini-phone .face-sub,.mini-phone .face-action{font-size:7px}.mini-phone .profile-banner{gap:8px}.mini-phone .photo-strip{gap:6px;margin:6px 0}.mini-phone .photo-tip{padding:7px;border-radius:10px;font-size:8px}
+  .decor-left{position:absolute;left:18px;bottom:14px;display:grid;gap:10px;color:#55716C;font-weight:950;font-size:13px}.decor-left div{display:flex;align-items:center;gap:8px}.decor-leaf{position:absolute;right:18px;bottom:18px;width:82px;height:82px;border-radius:28px;background:#D7E6DC;display:grid;place-items:center;font-size:44px;transform:rotate(-8deg);opacity:.85}
+  @media (max-width:1120px){.workarea{grid-template-columns:1fr}.phone-stage{position:static}.detail-panel{order:-1}.showcase-grid{grid-template-columns:repeat(3,minmax(200px,1fr))}.hero-board{grid-template-columns:1fr}.hero-copy{border-left:0;border-top:1px solid rgba(50,87,83,.18);padding-left:0;padding-top:18px}.elder-illus{display:none}}
+  @media (max-width:820px){.page{padding:14px}.layout{grid-template-columns:1fr}.sidebar{position:static}.nav{display:flex;overflow:auto;max-height:none}.nav button{white-space:nowrap}.phone{width:min(390px,calc(100vw - 28px));height:calc(min(390px,calc(100vw - 28px))*2.082)}.brand-name{font-size:42px}.brand-kor{font-size:20px}.logo-mark{width:66px;height:66px;font-size:34px}.showcase-grid{grid-template-columns:repeat(2,minmax(150px,1fr));gap:12px}.mini-phone{height:360px}.detail-panel{display:none}.hero-board{padding:18px}.hero-copy h1{font-size:22px}.hero-copy p{font-size:14px}}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="hero-board">
+    <div class="brand-block">
+      <div class="logo-mark">☎</div>
+      <div>
+        <div class="brand-kor">안심소리 가족콜</div>
+        <div class="brand-name">SoriCall</div>
+        <div class="brand-sub">가족 목소리 사칭 보이스피싱을<br>안심 단어와 가족 확인으로 예방합니다.</div>
+      </div>
+    </div>
+    <div class="hero-copy">
+      <h1>서비스 시나리오와 일치하도록 보완한<br>시니어 친화형 Web/App 화면</h1>
+      <p>서비스 흐름에 맞춰 가족 확인, 보호자 응답, 통화 후 분석, 위험 이력을 보완했습니다. 아래 화면 목록을 누르면 각 스마트폰 화면을 크게 확인할 수 있습니다.</p>
+    </div>
+    <div class="elder-illus"><div class="elder"></div><div class="elder man"></div></div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <h2>화면 목록</h2>
+      <div class="nav" id="nav"></div>
+      <div class="side-note">서비스 시나리오와 화면 구성을 대조하여 가족 확인, 보호자 응답, 음성 등록 문구를 보완했습니다.</div>
+    </aside>
+
+    <main>
+      <section class="workarea">
+        <div class="phone-stage">
+          <div class="phone"><div class="screen" id="screen"></div></div>
+        </div>
+        <div class="detail-panel" id="detail"></div>
+      </section>
+
+      <section class="showcase-section">
+        <div class="showcase-title">
+          <div>
+            <h2>전체 화면 미리보기</h2>
+            <p>스마트폰 Web/App 화면을 한 번에 비교할 수 있는 콘셉트 보드입니다.</p>
+          </div>
+          <span class="pill">Pastel · Mint · Senior Friendly</span>
+        </div>
+        <div class="showcase-grid" id="showcase"></div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<script>
+const appbar = (title,right='⚙') => `<div class="status"><span>9:41</span><span>LTE · 🔋</span></div><div class="appbar"><button class="iconbtn">‹</button><div class="app-title">${title}</div><button class="iconbtn">${right}</button></div>`;
+const simpleStatus = `<div class="status"><span>9:41</span><span>LTE · 🔋</span></div>`;
+const bottom = (active='home') => `<nav class="bottom-nav"><div class="${active==='home'?'active':''}">🏠<span>홈</span></div><div class="${active==='family'?'active':''}">👪<span>가족</span></div><div class="${active==='guard'?'active':''}">🛡️<span>안심</span></div><div class="${active==='history'?'active':''}">📋<span>기록</span></div></nav>`;
+const qr = Array.from({length:49},(_,i)=>`<i style="display:block;border-radius:2px;background:${(i%2===0||i%7===0||i%11===0)?'#24413F':'#fff'}"></i>`).join('');
+
+const screens = [
+  {
+    id:'onboarding', name:'01. 시작', title:'시작/서비스 소개', desc:'첫 화면은 앱의 목적을 짧고 부드럽게 전달합니다. 큰 로고와 단일 CTA를 사용해 어르신도 쉽게 시작할 수 있습니다.',
+    html:`${simpleStatus}<div class="content" style="text-align:center;position:relative"><div class="intro-logo"><div class="intro-mark">☎</div><h1>SoriCall</h1><p><b>소리로 지키는 가족의 안심</b><br>의심 전화는 알려드리고<br>가족이 함께 확인해요.</p></div><button class="primary" style="margin-top:220px">시작하기 〉</button><button class="ghost">이미 계정이 있어요</button><div class="landscape"></div></div>`
+  },
+  {
+    id:'role', name:'02. 역할 선택', title:'어르신/보호자 선택', desc:'어르신과 보호자 역할을 명확히 나누어 각 사용자에게 필요한 기능만 보여줍니다.',
+    html:`${simpleStatus}<div class="content"><h1 style="font-size:28px;line-height:1.22;letter-spacing:-.8px;color:#213F3D;margin:18px 0 6px">어떤 역할로<br>사용하시나요?</h1><p style="font-size:14px;line-height:1.55;color:#677A75;font-weight:760;margin-bottom:18px">원하는 역할을 선택해주세요.</p><div class="role-card"><div class="role-avatar">👵</div><div><strong>어르신</strong><span>안심 소리로<br>안전을 지켜요</span></div><div class="arrow">›</div></div><div class="role-card"><div class="role-avatar">👩‍💼</div><div><strong>보호자</strong><span>가족의 안심을<br>함께 지켜요</span></div><div class="arrow">›</div></div><div class="soft-card" style="text-align:center;background:#EEECE1"><p>나중에 설정에서 변경할 수 있어요.</p></div></div>`
+  },
+  {
+    id:'home', name:'03. 홈', title:'어르신 홈', desc:'어르신 프로필 얼굴과 등록된 가족 얼굴 정보를 함께 보여주도록 보완했습니다. 전화 상황에서 더 직관적으로 사람을 확인할 수 있습니다.',
+    html:`${appbar('SoriCall','🔔')}<div class="content"><div class="home-greeting"><div class="profile-banner"><div class="face-photo big">👵</div><div class="profile-stack"><h2>김영희 어르신 👋<br>오늘도 안심하세요!</h2><span class="badge blue">얼굴 사진 등록 완료</span></div></div><div class="status-pill"><span>🛡️ 안심 상태</span><b>정상</b></div></div><div class="tile-grid"><div class="tile"><span class="ico">📞</span><b>가족 확인</b></div><div class="tile"><span class="ico">🛡️</span><b>안심 단어</b></div><div class="tile"><span class="ico">👪</span><b>가족 보기</b></div><div class="tile"><span class="ico">🕒</span><b>위험 이력</b></div></div><div class="soft-card"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><span class="pill">👨‍👩‍👧 등록된 가족 얼굴</span><span class="badge">3명 등록</span></div><div class="photo-strip"><div class="face-card"><div class="face-photo teal">👩</div><div class="face-label">이지은</div><div class="face-sub">딸</div></div><div class="face-card"><div class="face-photo blue">👨</div><div class="face-label">김민수</div><div class="face-sub">아들</div></div><div class="face-card"><div class="face-photo yellow">👩</div><div class="face-label">박서연</div><div class="face-sub">며느리</div></div></div><p style="margin-top:2px">가족 얼굴을 함께 보여주면 전화를 끊은 뒤 누구에게 다시 전화해야 하는지 더 쉽게 알 수 있어요.</p></div><button class="danger">의심 전화예요</button></div>${bottom('home')}`
+  },
+  {
+    id:'link', name:'04. 부모님 연결', title:'부모님 연결', desc:'보호자 앱에서 생성한 QR 또는 초대코드로 부모님 기기와 안전하게 연결하는 화면입니다.',
+    html:`${appbar('부모님 연결','?')}<div class="content"><div class="soft-card" style="text-align:center"><h3>초대코드로 연결</h3><p>보호자가 보내준 초대코드를 입력하세요.</p><div style="width:154px;height:154px;margin:18px auto;background:#fff;border:9px solid #fff;border-radius:18px;display:grid;grid-template-columns:repeat(7,1fr);gap:4px;box-shadow:0 8px 20px rgba(70,60,40,.12)">${qr}</div><span class="badge blue">QR 스캔 가능</span></div><label class="label">초대코드</label><input class="input" value="8274" readonly><button class="primary">연결하기</button><button class="ghost">QR 코드 스캔</button></div>`
+  },
+  {
+    id:'family', name:'05. 가족 목록', title:'가족 등록 및 목록', desc:'가족 연락처, 음성 등록 상태와 함께 얼굴 사진 슬롯도 넣을 수 있도록 수정했습니다. 실제 서비스에서는 등록한 얼굴 사진으로 교체할 수 있습니다.',
+    html:`${appbar('가족 등록 및 목록','＋')}<div class="content"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><b>연결된 가족 <span style="color:#2B7E78">3</span></b><span class="badge">+ 가족 등록</span></div><div class="soft-card"><h3>가족 얼굴 사진</h3><div class="family-face-grid"><div class="face-card"><div class="face-photo">👵</div><div class="face-label">김영희</div><div class="face-sub">어르신</div><div class="face-action">사진 변경</div></div><div class="face-card"><div class="face-photo teal">👩</div><div class="face-label">이지은</div><div class="face-sub">딸</div><div class="face-action">사진 등록</div></div><div class="face-card"><div class="face-photo blue">👨</div><div class="face-label">김민수</div><div class="face-sub">아들</div><div class="face-action">사진 등록</div></div><div class="face-card"><div class="face-photo yellow">👩</div><div class="face-label">박서연</div><div class="face-sub">며느리</div><div class="face-action">사진 등록</div></div></div><button class="secondary">얼굴 사진 관리</button></div><div class="family-row"><div class="face-photo small teal">👩</div><div><strong>딸 이지은</strong><span>대표 보호자 · 음성 등록 완료</span></div><div class="row-actions"><button class="round-icon">☎</button><button class="round-icon">💬</button></div></div><div class="family-row"><div class="face-photo small blue">👨</div><div><strong>아들 김민수</strong><span>가족 연락처 확인</span></div><div class="row-actions"><button class="round-icon">☎</button><button class="round-icon">💬</button></div></div><div class="family-row"><div class="face-photo small yellow">👩</div><div><strong>며느리 박서연</strong><span>음성 등록 필요</span></div><div class="row-actions"><button class="round-icon">☎</button><button class="round-icon">💬</button></div></div><div class="photo-tip">얼굴 사진을 등록해 두면 어르신이 가족을 더 쉽게 구분할 수 있고, 보호자도 알림 화면에서 부모님 얼굴을 바로 확인할 수 있어요.</div></div>${bottom('family')}`
+  },
+  {
+    id:'safeword', name:'06. 안심 단어', title:'안심 단어 설정', desc:'안심 단어는 가족 사칭 전화를 구분하는 간단한 안전 장치입니다. 짧고 기억하기 쉬운 단어를 추천합니다.',
+    html:`${appbar('안심 단어 설정','저장')}<div class="content"><p style="font-size:14px;line-height:1.55;color:#667872;font-weight:760;text-align:center">위험 상황에서 사용하면 가족에게<br>바로 알림이 보내져요.</p><div class="safe-word"><span class="badge yellow">현재 안심 단어</span><div class="word">“도와줘” 🔊</div></div><label class="label">안심 단어 변경</label><input class="input" placeholder="새로운 안심 단어 입력"><p style="font-size:12px;color:#7A8782;font-weight:760">예) 살려줘, 도와줘, 위험해 등</p><div class="safe-tip">💡 짧고 기억하기 쉬운 단어가 좋아요. 가족에게만 알려주세요.</div></div>${bottom('guard')}`
+  },
+  {
+    id:'settings', name:'07. 알림 설정', title:'위험 알림 설정', desc:'번호 기반 경고, 보호자 알림, 권한 설정을 따뜻한 카드형 UI로 정리했습니다.',
+    html:`${appbar('위험 알림 설정','저장')}<div class="content"><div class="soft-card"><div class="toggle-row"><div><b>모르는 번호 주의 표시</b><p>가족 번호가 아니면 먼저 알려줘요.</p></div><div class="switch on"></div></div><div class="toggle-row"><div><b>위험 전화 보호자 알림</b><p>위험도 60점 이상일 때 알림</p></div><div class="switch on"></div></div><div class="toggle-row"><div><b>매우 위험 전화 무음</b><p>위험도 80점 이상 권장</p></div><div class="switch"></div></div></div><div class="safe-tip">통화 녹음 없이 전화번호 위험도와 사용자가 직접 누른 신고 기능을 중심으로 동작합니다.</div></div>${bottom('guard')}`
+  },
+  {
+    id:'warning', name:'08. 의심 전화 경고', title:'의심 전화 경고', desc:'위험 전화 상황에서는 행동 지침을 더 명확히 보완했습니다. “끊고 가족 확인”을 1차 행동으로 제시하고, 위험도와 탐지 신호를 함께 보여줍니다.',
+    html:`${simpleStatus}<div class="content"><div class="warning-top"><h1>의심 전화 경고</h1></div><div style="display:flex;justify-content:center;margin-top:2px"><span class="badge red">위험도 72점 · 높음</span></div><div class="alert-icon">!</div><div class="warning-title">가족 사칭 의심 전화입니다</div><p style="text-align:center;color:#5D4C49;font-weight:850;line-height:1.45">가족 목소리처럼 들려도<br>AI로 조작될 수 있습니다.</p><div class="danger-list"><div>☑ 가족 연락처가 아닌 번호</div><div>☑ 금전 요구 또는 송금 유도</div><div>☑ 전화를 끊지 못하게 유도</div></div><button class="danger">통화 종료 후 가족 확인</button><button class="warn">화상 가족 확인 요청</button><button class="ghost">안심 단어 물어보기</button></div>`
+  },
+
+  {
+    id:'video', name:'09. 화상 확인', title:'화상 가족 확인', desc:'일반 전화가 의심될 때 가족에게 SoriCall 화상 확인 요청을 보내고, 가족이 수락하면 등록된 얼굴과 실시간 영상 얼굴을 비교하는 화면입니다. 무단 자동 연결이 아니라 동의 기반 연결입니다.',
+    html:`${appbar('화상 가족 확인','🔒')}<div class="content"><div class="soft-card"><span class="badge red">의심 전화 확인 중</span><h3 style="margin-top:9px">전화를 건 사람이<br>등록된 가족인지 확인합니다</h3><p>가족에게 화상 확인 요청을 보냅니다. 가족이 수락하면 영상으로 얼굴을 확인할 수 있어요.</p></div><div class="metric-grid"><div class="metric"><div class="face-photo teal" style="margin:0 auto 8px">👩</div><strong style="font-size:16px">등록된 얼굴</strong><span>딸 이지은</span></div><div class="metric"><div class="face-photo blue" style="margin:0 auto 8px">📹</div><strong style="font-size:16px">화상 얼굴</strong><span>수락 후 표시</span></div></div><div class="risk-card" style="background:#F7FBF8;border-color:#C8DED7"><span class="badge">얼굴 비교 대기</span><h2 style="color:#2B7E78">가족이 수락하면<br>얼굴 비교를 시작합니다</h2><p>실시간 영상 얼굴과 등록된 가족 얼굴을 비교해 참고용 일치 가능성을 보여줍니다. 최종 판단은 보호자 확인과 저장된 번호 재통화가 우선입니다.</p></div><button class="primary">화상 확인 요청 보내기</button><button class="warn">저장된 가족 번호로 다시 전화</button><button class="ghost">보호자에게 알림</button><div class="photo-tip" style="margin-top:10px">카메라와 얼굴 비교는 가족의 명시적 동의 후에만 실행됩니다. 일반 전화 상대의 휴대폰 카메라를 앱이 임의로 켤 수는 없습니다.</div></div>${bottom('guard')}`
+  },
+  {
+    id:'guardian', name:'10. 보호자 확인', title:'보호자 긴급 확인', desc:'보호자가 부모님 얼굴과 가족 얼굴을 함께 확인하면서 응답할 수 있도록 화면을 보완했습니다.',
+    html:`${appbar('보호자 긴급 확인','')}<div class="content"><span class="badge red">NEW</span> <b style="font-size:14px;color:#6B4F4B">어머님께서 의심 전화를 받으셨어요.</b><div class="family-row" style="margin-top:10px"><div class="face-photo small">👵</div><div><strong>김영희 어르신</strong><span>010-1234-5678 · 오늘 10:32</span></div></div><div class="guardian-note"><div class="headline">⚠ 가족 사칭 의심</div><p style="font-size:13px;line-height:1.55;color:#5E6E69;font-weight:800">실제로 가족이 전화한 것이 맞습니까? 보호자 응답은 어르신 경고 화면과 위험 이력에 기록됩니다.</p></div><div class="soft-card"><h3>참조용 얼굴 사진</h3><div class="photo-strip"><div class="face-card"><div class="face-photo">👵</div><div class="face-label">김영희</div><div class="face-sub">어르신</div></div><div class="face-card"><div class="face-photo teal">👩</div><div class="face-label">이지은</div><div class="face-sub">딸</div></div><div class="face-card"><div class="face-photo blue">👨</div><div class="face-label">김민수</div><div class="face-sub">아들</div></div></div></div><h3 style="font-size:15px;margin:14px 0 8px">보호자 응답</h3><button class="secondary">내가 전화함</button><button class="danger">내가 아님, 사칭 의심</button><button class="ghost">확인 어려움</button><h3 style="font-size:15px;margin:14px 0 8px">권장 행동</h3><div class="recommend"><div>① 어머니께 저장된 가족 번호로 다시 전화하기</div><div>② 송금·앱 설치 요청이 있었는지 확인하기</div></div></div>${bottom('family')}`
+  },
+  {
+    id:'voice', name:'11. 가족 음성 등록', title:'가족 음성 등록', desc:'가족 음성뿐 아니라 얼굴 사진도 함께 관리할 수 있도록 보완했습니다. 실제 서비스에서는 사진 업로드 영역에 가족 사진을 넣을 수 있습니다.',
+    html:`${appbar('가족 음성 등록','⚙')}<div class="content"><div class="soft-card"><h3>가족 얼굴 확인</h3><div class="photo-strip"><div class="face-card"><div class="face-photo teal">👩</div><div class="face-label">이지은</div><div class="face-sub">딸</div></div><div class="face-card"><div class="face-photo blue">👨</div><div class="face-label">김민수</div><div class="face-sub">아들</div></div><div class="face-card"><div class="face-photo yellow">👩</div><div class="face-label">박서연</div><div class="face-sub">며느리</div></div></div><button class="secondary">얼굴 사진 등록/변경</button></div><div class="soft-card mic-card"><h3>이지은 님 목소리 등록</h3><p>가족이 직접 녹음 버튼을 눌러 짧은 문장을 읽어주세요.</p><div class="mic">🎙️</div><p style="font-size:13px;line-height:1.5;color:#55716C;font-weight:800">“엄마, 저 지은이에요. 급한 일도 꼭 가족끼리 확인해요.”</p><button class="primary">음성 등록하기</button><div class="wave"><i></i></div><span class="badge">사용자 직접 녹음만 허용</span></div><div class="safe-tip">등록 완료 후 운영 기본값은 원본 음성을 보관하지 않고 음성 특징값만 안전하게 관리합니다.</div><div class="soft-card"><h3>등록 상태</h3><div class="family-row"><div class="face-photo small teal">👩</div><div><strong>딸 이지은</strong><span>음성 등록 완료 · 얼굴 등록 완료</span></div><span class="badge">완료</span></div><div class="family-row"><div class="face-photo small blue">👨</div><div><strong>아들 김민수</strong><span>음성 등록 필요 · 얼굴 등록 가능</span></div><span class="badge yellow">대기</span></div></div></div>${bottom('family')}`
+  },
+  {
+    id:'analysis', name:'12. 분석 결과', title:'통화 후 분석', desc:'분석 결과 화면에도 비교용 가족 얼굴을 보여주도록 수정했습니다. 음성 분석 후 누구에게 다시 확인해야 하는지 한눈에 볼 수 있습니다.',
+    html:`${appbar('통화 후 분석','공유')}<div class="content"><div class="risk-card"><span class="badge red">매우 위험</span><h2>가족 목소리와<br>다를 가능성이 큽니다</h2><p>사용자가 직접 올린 통화 후 샘플에서 돈을 보내라는 요청과 앱 설치 요구가 함께 감지되었습니다.</p></div><div class="metric-grid"><div class="metric"><strong>42%</strong><span>가족 음성 유사도</span></div><div class="metric"><strong style="color:#D94A46">78%</strong><span>합성음성 의심도</span></div><div class="metric"><strong>95</strong><span>위험점수</span></div><div class="metric"><strong>4개</strong><span>위험 신호</span></div></div><div class="soft-card"><h3>비교용 가족 얼굴</h3><div class="photo-strip"><div class="face-card"><div class="face-photo teal">👩</div><div class="face-label">이지은</div><div class="face-sub">딸</div></div><div class="face-card"><div class="face-photo blue">👨</div><div class="face-label">김민수</div><div class="face-sub">아들</div></div><div class="face-card"><div class="face-photo yellow">👩</div><div class="face-label">박서연</div><div class="face-sub">며느리</div></div></div><p>분석 후 저장된 가족 얼굴과 함께 다시 확인하면 실제 가족에게 재연락하기 쉬워집니다.</p></div><button class="danger">보호자에게 결과 보내기</button><button class="ghost">상세 이유 보기</button></div>${bottom('guard')}`
+  },
+  {
+    id:'history', name:'13. 위험 이력', title:'위험 이력', desc:'위험 이벤트, 보호자 알림, 분석 결과를 시간순으로 확인하는 화면입니다.',
+    html:`${appbar('위험 이력','필터')}<div class="content"><div class="history-item"><div class="ico">🚨</div><div><strong>가족 사칭 의심 전화</strong><small>오늘 14:20 · 010-****-1298</small><span class="badge red">위험 72점</span></div></div><div class="history-item"><div class="ico">🔔</div><div><strong>보호자 알림 전송</strong><small>오늘 14:21 · 김지연 응답</small><span class="badge yellow">내가 아님</span></div></div><div class="history-item"><div class="ico">🎙️</div><div><strong>음성 분석 결과</strong><small>어제 19:03 · 합성음성 의심</small><span class="badge red">매우 위험 95점</span></div></div><div class="history-item"><div class="ico">✅</div><div><strong>가족 통화 확인</strong><small>6월 24일 09:12 · 저장된 가족 번호</small><span class="badge">안전</span></div></div></div>${bottom('history')}`
+  },
+  {
+    id:'privacy', name:'14. 개인정보', title:'개인정보와 동의', desc:'음성 정보의 동의, 삭제권, 원본 음성 미보관 원칙을 사용자가 이해하기 쉽게 표시합니다.',
+    html:`${appbar('개인정보와 동의','저장')}<div class="content"><div class="soft-card"><h3>가족 음성정보 수집·이용</h3><p>보이스피싱 탐지 목적의 음성 특징값 등록에 사용됩니다.</p><div class="consent"><span class="check">✓</span><span>동의합니다</span></div></div><div class="soft-card"><h3>원본 음성 보관</h3><p>운영 기본값은 등록 완료 후 원본 음성을 보관하지 않습니다.</p><div class="consent"><span class="check">✓</span><span>삭제 정책을 확인했습니다</span></div></div><div class="soft-card"><h3>프로필 삭제권</h3><p>가족 음성 프로필은 언제든 삭제할 수 있습니다.</p></div><button class="primary">동의하고 계속</button></div>${bottom('guard')}`
+  }
+];
+
+function render(id){
+  const s = screens.find(x=>x.id===id) || screens[0];
+  document.getElementById('screen').innerHTML = s.html;
+  document.getElementById('detail').innerHTML = `<h2>${s.title}</h2><p>${s.desc}</p><div class="spec"><div>화면</div><div>${s.name}</div><div>서비스명</div><div>안심소리 가족콜</div><div>앱 이름</div><div>SoriCall</div><div>스타일</div><div>베이지 배경, 민트 포인트, 둥근 카드, 시니어 친화 큰 글자</div></div><div class="chips"><span>가족 등록</span><span>안심 단어</span><span>의심전화 경고</span><span>보호자 확인</span><span>통화 후 분석</span><span>위험 이력</span></div>`;
+  document.querySelectorAll('.nav button').forEach(btn=>btn.classList.toggle('active',btn.dataset.id===s.id));
+  location.hash = s.id;
+}
+function init(){
+  const nav = document.getElementById('nav');
+  nav.innerHTML = screens.map(s=>`<button data-id="${s.id}">${s.name}</button>`).join('');
+  nav.addEventListener('click',e=>{if(e.target.matches('button')) render(e.target.dataset.id)});
+  const showcase = document.getElementById('showcase');
+  showcase.innerHTML = screens.map(s=>`<div class="mini-phone" title="${s.name}"><div class="phone"><div class="screen">${s.html}</div></div></div>`).join('');
+  render((location.hash||'').replace('#','') || 'onboarding');
+}
+init();
+</script>
+</body>
+</html>
