@@ -37,3 +37,6 @@ local.properties
 /.vscode-server/
 /.wget-hsts
 /backups/
+.lesshst
+.vim/
+.viminfo
