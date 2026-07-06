@@ -8,6 +8,10 @@ This directory contains product and engineering documentation for SoriCall.
 - `android_design.md`: Android MVP design
 - `ai_design.md`: AI mock service design
 - `environments.md`: development and production configuration
+- `ui_detailed_design.md`: mobile Web/PWA and Android UI detailed design
+- `soricall_ui_design_revised.md`: revised SoriCall UI design specification
+- `soricall_simple_ui_wireframe_design.md`: simplified 7-screen UI wireframe design
+- `worklog-2026-07-06-soricall-ui-sync.md`: latest UI/API sync worklog
 
 ## MVP Integration Status
 

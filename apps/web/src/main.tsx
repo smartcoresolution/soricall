@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import {
   AlertTriangle,
   BellRing,
+  Camera,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -17,10 +18,13 @@ import {
   Mic,
   Phone,
   PhoneCall,
+  PhoneForwarded,
   Shield,
+  UserCheck,
   UserPlus,
   Users,
   Video,
+  Volume2,
 } from "lucide-react";
 import {
   ApiHealth,
@@ -63,6 +67,9 @@ type Screen =
   | "login"
   | "role"
   | "connect"
+  | "contactSetup"
+  | "faceSetup"
+  | "voiceSetup"
   | "home"
   | "family"
   | "guard"
@@ -95,10 +102,10 @@ const emptyWorkspace: Workspace = {
 
 const bottomTabs: { key: Screen; label: string; icon: React.ElementType }[] = [
   { key: "home", label: "홈", icon: Home },
-  { key: "family", label: "가족", icon: Users },
-  { key: "guard", label: "경고", icon: Shield },
-  { key: "verify", label: "확인", icon: Video },
-  { key: "history", label: "기록", icon: History },
+  { key: "family", label: "가족등록", icon: Users },
+  { key: "guard", label: "전화수신", icon: PhoneCall },
+  { key: "verify", label: "추가확인", icon: UserCheck },
+  { key: "history", label: "결과", icon: Check },
 ];
 
 function App() {
@@ -118,10 +125,12 @@ function App() {
     phoneNumber: "",
   });
   const [consent, setConsent] = useState({
-    requiredData: false,
+    personalData: false,
+    voiceInfo: false,
+    faceInfo: false,
     privacy: false,
     nonMedical: false,
-    syntheticVoice: false,
+    aiAdvisory: false,
     aiResearch: false,
     marketing: false,
   });
@@ -145,6 +154,8 @@ function App() {
     unknownNumber: true,
     guardianAlert: true,
     voiceWarning: true,
+    largeText: true,
+    highContrast: false,
   });
 
   const hasAccount = Boolean(workspace.account);
@@ -243,7 +254,8 @@ function App() {
   }
 
   async function submitSignup() {
-    const requiredAccepted = consent.requiredData && consent.privacy && consent.nonMedical && consent.syntheticVoice;
+    const requiredAccepted =
+      consent.personalData && consent.voiceInfo && consent.faceInfo && consent.privacy && consent.nonMedical && consent.aiAdvisory;
     if (!requiredAccepted) {
       setError("필수 동의 항목을 모두 확인해 주세요.");
       return;
@@ -604,9 +616,46 @@ function App() {
             />
           )}
           {screen === "login" && <LoginScreen draft={login} setDraft={setLogin} error={error} busy={busy} onSubmit={submitLogin} />}
-          {screen === "role" && <RoleScreen role={workspace.role} onChoose={chooseRole} />}
+          {screen === "role" && (
+            <RoleScreen
+              onContact={() => {
+                setWorkspace((current) => ({ ...current, role: "GUARDIAN" }));
+                navigate("contactSetup");
+              }}
+              onFace={() => navigate("faceSetup")}
+              onVoice={() => navigate("voiceSetup")}
+            />
+          )}
           {screen === "connect" && (
             <ConnectScreen draft={connect} setDraft={setConnect} busy={busy} role={workspace.role} onSubmit={submitConnect} />
+          )}
+          {screen === "contactSetup" && (
+            <ContactSetupScreen
+              draft={connect}
+              setDraft={setConnect}
+              busy={busy}
+              onSubmit={submitConnect}
+            />
+          )}
+          {screen === "faceSetup" && (
+            <FaceSetupScreen
+              hasWorkspace={hasWorkspace}
+              onContact={() => {
+                setWorkspace((current) => ({ ...current, role: "GUARDIAN" }));
+                navigate("contactSetup");
+              }}
+              onFamily={() => navigate(hasWorkspace ? "family" : "contactSetup")}
+            />
+          )}
+          {screen === "voiceSetup" && (
+            <VoiceSetupScreen
+              hasWorkspace={hasWorkspace}
+              onContact={() => {
+                setWorkspace((current) => ({ ...current, role: "GUARDIAN" }));
+                navigate("contactSetup");
+              }}
+              onFamily={() => navigate(hasWorkspace ? "family" : "contactSetup")}
+            />
           )}
           {screen === "home" && hasWorkspace && (
             <HomeScreen
@@ -770,19 +819,23 @@ function SignupScreen(props: {
 
 function ConsentScreen(props: {
   consent: {
-    requiredData: boolean;
+    personalData: boolean;
+    voiceInfo: boolean;
+    faceInfo: boolean;
     privacy: boolean;
     nonMedical: boolean;
-    syntheticVoice: boolean;
+    aiAdvisory: boolean;
     aiResearch: boolean;
     marketing: boolean;
   };
   setConsent: React.Dispatch<
     React.SetStateAction<{
-      requiredData: boolean;
+      personalData: boolean;
+      voiceInfo: boolean;
+      faceInfo: boolean;
       privacy: boolean;
       nonMedical: boolean;
-      syntheticVoice: boolean;
+      aiAdvisory: boolean;
       aiResearch: boolean;
       marketing: boolean;
     }>
@@ -793,14 +846,21 @@ function ConsentScreen(props: {
 }) {
   const allAccepted = Object.values(props.consent).every(Boolean);
   const requiredAccepted =
-    props.consent.requiredData && props.consent.privacy && props.consent.nonMedical && props.consent.syntheticVoice;
+    props.consent.personalData &&
+    props.consent.voiceInfo &&
+    props.consent.faceInfo &&
+    props.consent.privacy &&
+    props.consent.nonMedical &&
+    props.consent.aiAdvisory;
 
   function setAll(next: boolean) {
     props.setConsent({
-      requiredData: next,
+      personalData: next,
+      voiceInfo: next,
+      faceInfo: next,
       privacy: next,
       nonMedical: next,
-      syntheticVoice: next,
+      aiAdvisory: next,
       aiResearch: next,
       marketing: next,
     });
@@ -818,8 +878,8 @@ function ConsentScreen(props: {
           <strong>안내</strong>
         </div>
         <p>
-          SoriCall은 치매를 진단하지 않습니다. 가족이 등록한 목소리와 얼굴 정보를 바탕으로 통화 중 의심 신호와
-          보호자 확인을 돕는 비의료 참고 서비스입니다.
+          SoriCall은 가족 사칭 보이스피싱을 예방하기 위한 안심 통화 서비스입니다. 가족이 등록한 목소리와 얼굴 정보를
+          바탕으로 의심 신호와 보호자 확인을 돕지만, AI 결과는 가족 여부를 확정하지 않는 참고 정보입니다.
         </p>
       </section>
 
@@ -830,16 +890,23 @@ function ConsentScreen(props: {
       </button>
 
       <div className="consent-list">
-        <ConsentItem checked={props.consent.requiredData} required label="데이터 수집 및 분석에 동의합니다." onClick={() => toggle("requiredData")} />
+        <ConsentItem checked={props.consent.personalData} required label="서비스 제공을 위한 개인정보 수집 및 이용에 동의합니다." onClick={() => toggle("personalData")} />
         <ConsentItem checked={props.consent.privacy} required label="개인정보 처리 방침에 동의합니다." onClick={() => toggle("privacy")} />
-        <ConsentItem checked={props.consent.nonMedical} required label="비의료적 서비스임을 이해하고 동의합니다." onClick={() => toggle("nonMedical")} />
-        <ConsentItem checked={props.consent.syntheticVoice} required label="제3자 음성 포함 가능성을 이해하고 동의합니다." onClick={() => toggle("syntheticVoice")} />
+        <ConsentItem checked={props.consent.voiceInfo} required label="가족 확인을 위한 음성 특징 분석에 동의합니다." onClick={() => toggle("voiceInfo")} />
+        <ConsentItem checked={props.consent.faceInfo} required label="가족 확인을 위한 얼굴 이미지 및 특징 분석에 동의합니다." onClick={() => toggle("faceInfo")} />
+        <ConsentItem checked={props.consent.nonMedical} required label="이 서비스는 의료 진단을 제공하지 않음을 이해했습니다." onClick={() => toggle("nonMedical")} />
+        <ConsentItem checked={props.consent.aiAdvisory} required label="AI 결과는 참고 정보이며 최종 판단이 아님을 이해했습니다." onClick={() => toggle("aiAdvisory")} />
       </div>
 
       <div className="consent-section-label">선택 동의</div>
       <div className="consent-list">
-        <ConsentItem checked={props.consent.aiResearch} label="AI 모델 개선 및 연구 활용에 동의합니다." onClick={() => toggle("aiResearch")} />
-        <ConsentItem checked={props.consent.marketing} label="서비스 소식과 보호 알림 안내 수신에 동의합니다." onClick={() => toggle("marketing")} />
+        <ConsentItem checked={props.consent.aiResearch} label="익명화된 품질 정보의 AI 모델 개선 활용에 동의합니다." onClick={() => toggle("aiResearch")} />
+        <ConsentItem checked={props.consent.marketing} label="서비스 안내와 보호 알림 수신에 동의합니다." onClick={() => toggle("marketing")} />
+      </div>
+
+      <div className="notice">
+        <Shield size={18} />
+        <span>등록된 음성과 얼굴 정보는 가족 확인 목적으로만 사용되며, 언제든 삭제를 요청할 수 있습니다.</span>
       </div>
 
       {props.error && <p className="form-error">{props.error}</p>}
@@ -887,37 +954,101 @@ function LoginScreen(props: {
   );
 }
 
-function RoleScreen(props: { role: "SENIOR" | "GUARDIAN" | null; onChoose: (role: "SENIOR" | "GUARDIAN") => void }) {
+function RoleScreen(props: { onContact: () => void; onFace: () => void; onVoice: () => void }) {
   return (
-    <div className="stack">
-      <section className="service-title-block">
-        <h2>목소리와 가족 확인으로 안심을 지켜볼까요?</h2>
+    <div className="setup-menu">
+      <SetupStepButton icon={Phone} title="가족 연락처 등록" text="이름, 관계, 전화번호를 등록합니다." onClick={props.onContact} />
+      <SetupStepButton icon={Camera} title="얼굴 프로필 등록" text="사진이나 촬영으로 가족 얼굴을 등록합니다." onClick={props.onFace} />
+      <SetupStepButton icon={Mic} title="음성 프로필 등록" text="명시적 동의 후 목소리 샘플을 등록합니다." onClick={props.onVoice} />
+    </div>
+  );
+}
+
+function SetupStepButton(props: { icon: React.ElementType; title: string; text: string; onClick: () => void }) {
+  const Icon = props.icon;
+  return (
+    <button className="setup-step-button" type="button" onClick={props.onClick}>
+      <div className="setup-step-icon">
+        <Icon size={24} />
+      </div>
+      <div>
+        <strong>{props.title}</strong>
+        <p>{props.text}</p>
+      </div>
+      <ChevronRight size={22} />
+    </button>
+  );
+}
+
+function ContactSetupScreen(props: {
+  draft: { familyName: string; seniorName: string; seniorPhone: string; relation: string };
+  setDraft: React.Dispatch<React.SetStateAction<{ familyName: string; seniorName: string; seniorPhone: string; relation: string }>>;
+  busy: boolean;
+  onSubmit: (event: FormEvent) => void;
+}) {
+  return (
+    <form className="stack" onSubmit={props.onSubmit}>
+      <section className="section-card form-card">
+        <p className="form-kicker">1단계</p>
+        <h2>가족 연락처 등록</h2>
+        <p className="setup-description">의심 전화가 왔을 때 저장된 가족 번호로 다시 확인할 수 있도록 가족 정보를 먼저 등록합니다.</p>
+        <input value={props.draft.familyName} onChange={(event) => props.setDraft((draft) => ({ ...draft, familyName: event.target.value }))} placeholder="가족 이름" />
+        <input value={props.draft.seniorName} onChange={(event) => props.setDraft((draft) => ({ ...draft, seniorName: event.target.value }))} placeholder="어르신 이름" />
+        <input inputMode="tel" value={props.draft.seniorPhone} onChange={(event) => props.setDraft((draft) => ({ ...draft, seniorPhone: event.target.value }))} placeholder="어르신 휴대폰" />
+        <input value={props.draft.relation} onChange={(event) => props.setDraft((draft) => ({ ...draft, relation: event.target.value }))} placeholder="보호자 관계" />
+        <button className="primary-button" type="submit" disabled={props.busy}>
+          {props.busy ? <Loader2 className="spin" size={18} /> : <Phone size={18} />}
+          연락처 등록 완료
+        </button>
       </section>
-      <button className={props.role === "GUARDIAN" ? "role-card selected" : "role-card"} onClick={() => props.onChoose("GUARDIAN")}>
-        <div className="role-avatar">보</div>
-        <div>
-          <strong>부모님 전화 안심확인</strong>
-          <span>부모님 통화와 위험 알림을 보호자가 함께 확인합니다.</span>
-        </div>
-        <ChevronRight size={20} />
-      </button>
-      <button className={props.role === "SENIOR" ? "role-card selected" : "role-card"} onClick={() => props.onChoose("SENIOR")}>
-        <div className="role-avatar">나</div>
-        <div>
-          <strong>내 안심 보호 시작</strong>
-          <span>내 전화와 가족 확인 요청을 보호자에게 연결합니다.</span>
-        </div>
-        <ChevronRight size={20} />
-      </button>
-      <button className="history-link-card" onClick={() => props.onChoose("GUARDIAN")}>
-        <History size={24} />
-        <strong>이전 결과 보기</strong>
-        <ChevronRight size={22} />
-      </button>
       <div className="notice">
         <Shield size={18} />
-        <span>본 서비스는 의료 진단이 아닌 가족 보호 참고 정보를 제공합니다.</span>
+        <span>전화번호는 위험 전화 판단과 가족 재확인 안내에 사용됩니다.</span>
       </div>
+    </form>
+  );
+}
+
+function FaceSetupScreen(props: { hasWorkspace: boolean; onContact: () => void; onFamily: () => void }) {
+  return (
+    <div className="stack">
+      <section className="section-card setup-detail-card">
+        <div className="setup-detail-icon"><Camera size={32} /></div>
+        <p className="form-kicker">2단계</p>
+        <h2>얼굴 프로필 등록</h2>
+        <p>가족 사진이나 촬영 이미지를 등록해 화상 확인 시 등록된 가족인지 참고할 수 있게 합니다.</p>
+        <div className="setup-detail-list">
+          <span>얼굴 등록 목적 안내</span>
+          <span>사진 선택 또는 카메라 촬영</span>
+          <span>흐림·역광·가림 상태 확인</span>
+          <span>등록 완료 또는 재촬영</span>
+        </div>
+        <button className="primary-button" onClick={props.onFamily}>
+          {props.hasWorkspace ? "가족 화면에서 얼굴 등록" : "가족 연락처 먼저 등록"}
+        </button>
+      </section>
+    </div>
+  );
+}
+
+function VoiceSetupScreen(props: { hasWorkspace: boolean; onContact: () => void; onFamily: () => void }) {
+  return (
+    <div className="stack">
+      <section className="section-card setup-detail-card">
+        <div className="setup-detail-icon"><Mic size={32} /></div>
+        <p className="form-kicker">3단계</p>
+        <h2>음성 프로필 등록</h2>
+        <p>본인의 명시적 동의 후 조용한 곳에서 짧은 문장을 녹음해 가족 목소리 확인에 사용합니다.</p>
+        <div className="voice-phrase-list">
+          <strong>권장 녹음 문장</strong>
+          <span>안심소리 가족콜 목소리 등록을 시작합니다.</span>
+          <span>돈을 보내기 전에는 반드시 다시 전화해 주세요.</span>
+          <span>오늘도 안전하게 통화하세요.</span>
+        </div>
+        <button className="primary-button" onClick={props.onFamily}>
+          {props.hasWorkspace ? "가족 화면에서 음성 등록" : "가족 연락처 먼저 등록"}
+        </button>
+      </section>
     </div>
   );
 }
@@ -980,33 +1111,50 @@ function HomeScreen(props: {
   onVideo: () => void;
   onNavigate: (screen: Screen) => void;
 }) {
+  const featuredMembers = props.workspace.members.slice(0, 3);
+
   return (
-    <div className="stack">
-      <section className="greeting">
-        <div className="portrait">{props.workspace.senior?.name.slice(0, 1)}</div>
+    <div className="stack senior-mode">
+      <section className="simple-status-card safe">
         <div>
-          <h2>{props.workspace.senior?.name} 오늘도 안심하세요.</h2>
-          <p>{props.workspace.account?.display_name} 계정으로 보호 서비스가 연결되어 있습니다.</p>
+          <strong>안심 보호 중입니다</strong>
+          <span>등록된 가족 번호를 확인합니다</span>
         </div>
+        <Shield size={34} />
       </section>
-      <section className={props.latestRisk ? "risk-banner active" : "risk-banner"}>
-        <Shield size={23} />
-        <div>
-          <strong>{props.latestRisk ? "위험 전화 확인 필요" : "안심 상태"}</strong>
-          <span>{props.latestRisk?.summary ?? "최근 위험 전화가 없습니다."}</span>
-        </div>
+
+      <section className="simple-family-list">
+        {featuredMembers.length === 0 && (
+          <button className="simple-empty-action" onClick={() => props.onNavigate("family")}>
+            <Users size={28} />
+            <strong>등록된 가족이 없습니다</strong>
+            <span>가족 등록을 먼저 진행하세요</span>
+          </button>
+        )}
+        {featuredMembers.map((member) => (
+          <article className="simple-family-card" key={member.id}>
+            <div className="simple-face">{member.name.slice(0, 1)}</div>
+            <div>
+              <strong>{member.name}</strong>
+              <span>{member.relation ?? "가족"} / 등록 완료</span>
+            </div>
+            <button type="button">전화</button>
+          </article>
+        ))}
       </section>
-      <div className="quick-grid">
-        <QuickButton icon={PhoneCall} label="위험 전화 평가" onClick={props.onEvaluate} danger />
-        <QuickButton icon={Video} label="화상 가족 확인" onClick={props.onVideo} />
-        <QuickButton icon={Users} label="가족 등록" onClick={() => props.onNavigate("family")} />
-        <QuickButton icon={KeyRound} label="안심 단어" onClick={() => props.onNavigate("settings")} />
-      </div>
-      <section className="summary-card">
-        <SummaryRow label="가족 연락처" value={`${props.workspace.members.length}명`} />
-        <SummaryRow label="얼굴 프로필" value={`${props.faces.length}개`} />
-        <SummaryRow label="음성 프로필" value={`${props.voices.length}개`} />
-        <SummaryRow label="최근 위험도" value={props.callEvaluation?.risk_level ?? "-"} />
+
+      <button className="warning-button simple-large-button" onClick={props.onEvaluate}>
+        보호자에게 도움 요청
+      </button>
+
+      <section className="simple-flow-strip" aria-label="간략 서비스 흐름">
+        <span>가족 등록</span>
+        <i />
+        <span>전화 수신</span>
+        <i />
+        <span>번호 확인</span>
+        <i />
+        <span>결과 안내</span>
       </section>
     </div>
   );
@@ -1023,37 +1171,57 @@ function FamilyScreen(props: {
 }) {
   return (
     <div className="stack">
+      <section className="simple-screen-title green">
+        <strong>1. 가족 등록</strong>
+      </section>
+
+      <section className="section-card simple-register-card">
+        <Users size={48} />
+        <div className="simple-bullet-list">
+          <span>자녀·손자 정보 등록</span>
+          <span>전화번호 등록</span>
+          <span>얼굴 등록</span>
+          <span>음성 등록</span>
+        </div>
+      </section>
+
+      <form className="section-card form-card" onSubmit={props.onAdd}>
+        <h2>가족 추가</h2>
+        <input aria-label="이름" placeholder="가족 이름" value={props.memberDraft.name} onChange={(event) => props.setMemberDraft((draft) => ({ ...draft, name: event.target.value }))} />
+        <input aria-label="관계" placeholder="관계 예: 아들, 손자" value={props.memberDraft.relation} onChange={(event) => props.setMemberDraft((draft) => ({ ...draft, relation: event.target.value }))} />
+        <input aria-label="전화번호" placeholder="전화번호" inputMode="tel" value={props.memberDraft.phone_number} onChange={(event) => props.setMemberDraft((draft) => ({ ...draft, phone_number: event.target.value }))} />
+        <button className="primary-button" type="submit">
+          가족 추가하기
+        </button>
+      </form>
+
       <section className="section-card">
         <div className="section-title">
-          <h2>연결된 가족</h2>
+          <h2>등록된 가족</h2>
           <span>{props.workspace.members.length}명</span>
         </div>
-        <div className="family-list">
+        <div className="family-card-list">
           {props.workspace.members.map((member) => (
-            <article className="family-item" key={member.id}>
-              <div className="face">{member.name.slice(0, 1)}</div>
-              <div>
-                <strong>{member.name}</strong>
-                <span>{member.relation ?? "가족"} · 끝자리 {member.phone_number_last4 ?? "----"}</span>
-              </div>
-              <Check size={18} />
-            </article>
+            <FamilyFaceCard
+              key={member.id}
+              member={member}
+              face={props.faces.find((face) => face.family_member_id === member.id) ?? null}
+              voice={props.voices.find((voice) => voice.family_member_id === member.id) ?? null}
+            />
           ))}
         </div>
       </section>
-      <form className="section-card form-card" onSubmit={props.onAdd}>
-        <h2>가족 추가</h2>
-        <input aria-label="이름" value={props.memberDraft.name} onChange={(event) => props.setMemberDraft((draft) => ({ ...draft, name: event.target.value }))} />
-        <input aria-label="관계" value={props.memberDraft.relation} onChange={(event) => props.setMemberDraft((draft) => ({ ...draft, relation: event.target.value }))} />
-        <input aria-label="전화번호" inputMode="tel" value={props.memberDraft.phone_number} onChange={(event) => props.setMemberDraft((draft) => ({ ...draft, phone_number: event.target.value }))} />
-        <button className="primary-button" type="submit">
-          가족과 얼굴 등록
-        </button>
-      </form>
-      <section className="section-card">
+
+      <section className="section-card biometric-consent-card">
         <div className="section-title">
-          <h2>인증 프로필</h2>
-          <span>얼굴 {props.faces.length} · 음성 {props.voices.length}</span>
+          <h2>얼굴·음성 등록</h2>
+          <span>선택 확인</span>
+        </div>
+        <p>등록된 얼굴과 목소리는 가족 확인 목적의 참고 정보로만 사용됩니다.</p>
+        <div className="enroll-steps">
+          <span><Camera size={16} /> 사진 또는 촬영으로 얼굴 등록</span>
+          <span><Mic size={16} /> 짧은 문장으로 음성 등록</span>
+          <span><UserCheck size={16} /> 보호자 확인과 함께 사용</span>
         </div>
         <button className="secondary-button" onClick={props.onVoice}>
           <Mic size={18} />
@@ -1072,30 +1240,42 @@ function GuardScreen(props: {
   onEvaluate: () => void;
   onNotify: () => void;
 }) {
+  const risk = props.evaluation ? riskCopy(props.evaluation.risk_level) : null;
+  const isHighRisk = risk?.tone === "high" || risk?.tone === "critical";
   return (
     <div className="stack">
-      <section className="alert-card">
-        <AlertTriangle size={44} />
-        <h2>의심 전화 경고</h2>
-        <p>번호 위험도와 가족 사칭 패턴을 평가합니다.</p>
+      <section className="simple-screen-title blue">
+        <strong>3. 전화 수신</strong>
       </section>
-      <section className="section-card form-card">
+
+      <section className="incoming-call-card">
+        <PhoneCall size={58} />
+        <span>상대방이</span>
+        <strong>자녀·손자라고 주장합니다</strong>
         <label>
           수신 번호
           <input inputMode="tel" value={props.phoneNumber} onChange={(event) => props.setPhoneNumber(event.target.value)} />
         </label>
-        <button className="danger-button" onClick={props.onEvaluate}>
-          위험도 평가 API 호출
+        <button className="primary-button" onClick={props.onEvaluate}>
+          등록된 가족 번호인지 확인 중
         </button>
       </section>
+
       {props.evaluation && (
-        <section className="danger-result">
-          <span>{props.evaluation.risk_level}</span>
-          <h2>{props.evaluation.message_for_senior}</h2>
-          <p>위험도 {props.evaluation.risk_score}점 · {props.evaluation.reason_codes.join(", ")}</p>
+        <section className={isHighRisk ? "simple-warning-card danger" : "simple-warning-card caution"}>
+          <AlertTriangle size={54} />
+          <h2>{isHighRisk ? "등록된 가족 번호가 아닙니다" : "확인이 더 필요합니다"}</h2>
+          <p>{isHighRisk ? "가족 사칭 전화일 수 있습니다." : "가족 번호와 상황을 한 번 더 확인하세요."}</p>
+          <div className="do-not-list">
+            <span>돈을 보내지 마세요</span>
+            <span>계좌번호를 말하지 마세요</span>
+            <span>앱 설치를 하지 마세요</span>
+          </div>
+          <button className="danger-button">
+            전화 끊기
+          </button>
           <button className="warning-button" onClick={props.onNotify} disabled={!props.latestRisk}>
-            <BellRing size={18} />
-            보호자 알림 보내기
+            보호자에게 확인 요청
           </button>
         </section>
       )}
@@ -1111,35 +1291,58 @@ function VerifyScreen(props: {
   onAccept: () => void;
   onRespond: (response: "REAL_CALL" | "NOT_ME" | "UNKNOWN") => void;
 }) {
+  const faceMessage = faceResultCopy(props.latestVideo?.match_score ?? null, props.latestVideo?.result);
   return (
     <div className="stack">
-      <section className="video-card">
-        <div className="video-placeholder">
-          <Video size={44} />
-          <span>화상 확인 대기</span>
-        </div>
-        <h2>{props.primaryMember?.name ?? "가족"} 얼굴 확인</h2>
-        <p>요청 상태: {props.latestVideo?.status ?? "요청 전"} · 결과: {props.latestVideo?.result ?? "-"}</p>
+      <section className="simple-screen-title teal">
+        <strong>5. 추가 확인</strong>
+      </section>
+
+      <section className="section-card extra-check-card">
+        <h2>가족인지 추가 확인합니다</h2>
+        <ExtraCheckItem icon={Mic} title="음성 확인" text="등록된 목소리와 비교" />
+        <ExtraCheckItem icon={Video} title="얼굴 확인" text={faceMessage.senior} />
+        <ExtraCheckItem icon={BellRing} title="보호자 확인" text="가족에게 확인 요청" />
         <button className="primary-button" onClick={props.onRequest}>
-          화상 확인 요청 저장
+          보호자에게 확인 요청
         </button>
         <button className="secondary-button" onClick={props.onAccept} disabled={!props.latestVideo}>
-          얼굴 일치 수락 저장
+          얼굴 확인 결과 저장
         </button>
       </section>
-      <section className="section-card">
-        <div className="section-title">
-          <h2>보호자 응답</h2>
-          <span>{props.latestNotification?.status ?? "알림 없음"}</span>
+
+      <section className="section-card guardian-alert-card">
+        <h2>7. 보호자 알림</h2>
+        <p>부모님에게 의심 전화가 왔습니다</p>
+        <div className="guardian-alert-reason">
+          <strong>미등록 번호</strong>
+          <span>자녀라고 주장한 전화</span>
+          <span>010-****-7788</span>
         </div>
-        <button className="secondary-button" onClick={() => props.onRespond("REAL_CALL")} disabled={!props.latestNotification}>
-          내가 전화함
-        </button>
         <button className="danger-button" onClick={() => props.onRespond("NOT_ME")} disabled={!props.latestNotification}>
-          내가 아님, 사칭 의심
+          내가 전화한 것 아님
+        </button>
+        <button className="secondary-button" onClick={() => props.onRespond("REAL_CALL")} disabled={!props.latestNotification}>
+          내가 전화한 것 맞음
+        </button>
+        <button className="ghost-button" onClick={() => props.onRespond("UNKNOWN")} disabled={!props.latestNotification}>
+          모르겠음
         </button>
       </section>
     </div>
+  );
+}
+
+function ExtraCheckItem(props: { icon: React.ElementType; title: string; text: string }) {
+  const Icon = props.icon;
+  return (
+    <article className="extra-check-item">
+      <Icon size={23} />
+      <div>
+        <strong>{props.title}</strong>
+        <span>{props.text}</span>
+      </div>
+    </article>
   );
 }
 
@@ -1166,14 +1369,42 @@ function HistoryScreen({ workspace }: { workspace: Workspace }) {
   ];
   return (
     <div className="stack">
+      <section className="simple-screen-title red">
+        <strong>6. 결과 안내</strong>
+      </section>
+
+      <section className="result-guide-list">
+        <article className="result-guide-card safe">
+          <Check size={28} />
+          <div>
+            <strong>가족 확인됨</strong>
+            <span>안전 통화</span>
+          </div>
+        </article>
+        <article className="result-guide-card caution">
+          <Info size={28} />
+          <div>
+            <strong>확인 어려움</strong>
+            <span>가족 번호로 다시 전화</span>
+          </div>
+        </article>
+        <article className="result-guide-card danger">
+          <AlertTriangle size={28} />
+          <div>
+            <strong>가족 아님 의심</strong>
+            <span>통화 차단</span>
+          </div>
+        </article>
+      </section>
+
       <section className="section-card">
         <div className="section-title">
-          <h2>서비스 기록</h2>
+          <h2>최근 기록</h2>
           <span>{items.length}건</span>
         </div>
         <div className="timeline">
           {items.length === 0 && <p className="empty">아직 저장된 기록이 없습니다.</p>}
-          {items.map((item) => {
+          {items.slice(0, 5).map((item) => {
             const Icon = item.icon;
             return (
               <article key={item.id}>
@@ -1187,13 +1418,14 @@ function HistoryScreen({ workspace }: { workspace: Workspace }) {
           })}
         </div>
       </section>
+      <button className="warning-button">보호자 알림</button>
     </div>
   );
 }
 
 function SettingsScreen(props: {
-  settings: { unknownNumber: boolean; guardianAlert: boolean; voiceWarning: boolean };
-  setSettings: React.Dispatch<React.SetStateAction<{ unknownNumber: boolean; guardianAlert: boolean; voiceWarning: boolean }>>;
+  settings: { unknownNumber: boolean; guardianAlert: boolean; voiceWarning: boolean; largeText: boolean; highContrast: boolean };
+  setSettings: React.Dispatch<React.SetStateAction<{ unknownNumber: boolean; guardianAlert: boolean; voiceWarning: boolean; largeText: boolean; highContrast: boolean }>>;
   safeWord: string;
   setSafeWord: (value: string) => void;
   matched: boolean | null;
@@ -1219,9 +1451,22 @@ function SettingsScreen(props: {
         <Toggle label="음성 경고 안내" checked={props.settings.voiceWarning} onClick={() => toggleSetting(props.setSettings, "voiceWarning")} />
       </section>
       <section className="section-card">
+        <div className="section-title">
+          <h2>접근성</h2>
+          <span>어르신 모드</span>
+        </div>
+        <Toggle label="글자 크게 보기" checked={props.settings.largeText} onClick={() => toggleSetting(props.setSettings, "largeText")} />
+        <Toggle label="고대비로 보기" checked={props.settings.highContrast} onClick={() => toggleSetting(props.setSettings, "highContrast")} />
+        <Toggle label="위험 상황 음성 안내" checked={props.settings.voiceWarning} onClick={() => toggleSetting(props.setSettings, "voiceWarning")} />
+      </section>
+      <section className="section-card">
         <div className="api-info">
           <Database size={18} />
           <span>{props.apiBase || "API 자동 탐색"}</span>
+        </div>
+        <div className="privacy-note">
+          <Volume2 size={17} />
+          <span>음성·얼굴 정보는 가족 확인 목적으로만 사용되며, 서버 데이터 삭제는 별도 요청으로 처리합니다.</span>
         </div>
         <button className="ghost-button" onClick={props.onReset}>
           로그아웃 및 이 기기 데이터 초기화
@@ -1276,6 +1521,49 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+function FamilyFaceCard(props: {
+  member: FamilyMember;
+  face: FaceProfile | null;
+  voice: VoiceProfile | null;
+  seniorMode?: boolean;
+  onVideo?: () => void;
+}) {
+  const complete = Boolean(props.face?.consent_accepted && props.voice);
+  const faceReady = Boolean(props.face?.consent_accepted);
+  const voiceReady = Boolean(props.voice);
+  return (
+    <article className={props.seniorMode ? "family-face-card senior" : "family-face-card"}>
+      <div className="family-face-avatar" aria-hidden="true">{props.member.name.slice(0, 1)}</div>
+      <div className="family-face-body">
+        <div>
+          <strong>{props.member.name}</strong>
+          <span>{props.member.relation ?? "가족"}{props.seniorMode ? "" : ` · 끝자리 ${props.member.phone_number_last4 ?? "----"}`}</span>
+        </div>
+        <div className="status-badges">
+          <Badge tone={complete ? "safe" : faceReady ? "primary" : "caution"} label={complete ? "안심 등록 완료" : faceReady ? "얼굴 등록 완료" : "얼굴 등록 필요"} />
+          <Badge tone={voiceReady ? "primary" : "caution"} label={voiceReady ? "목소리 등록 완료" : "목소리 등록 필요"} />
+        </div>
+      </div>
+      {props.seniorMode && (
+        <div className="family-face-actions">
+          <button className="primary-button" type="button">
+            <PhoneCall size={18} />
+            전화하기
+          </button>
+          <button className="secondary-button" type="button" onClick={props.onVideo}>
+            <Video size={18} />
+            영상확인
+          </button>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function Badge({ tone, label }: { tone: "safe" | "primary" | "caution" | "danger"; label: string }) {
+  return <span className={`badge ${tone}`}>{label}</span>;
+}
+
 function Toggle({ label, checked, onClick }: { label: string; checked: boolean; onClick: () => void }) {
   return (
     <button className="toggle" onClick={onClick}>
@@ -1300,6 +1588,9 @@ function titleFor(screen: Screen): string {
     login: "로그인",
     role: "서비스 시작",
     connect: "부모님 연결",
+    contactSetup: "가족 연락처 등록",
+    faceSetup: "얼굴 프로필 등록",
+    voiceSetup: "음성 프로필 등록",
     home: "홈",
     family: "가족 등록",
     guard: "의심 전화 경고",
@@ -1307,6 +1598,22 @@ function titleFor(screen: Screen): string {
     history: "기록",
     settings: "설정",
   }[screen];
+}
+
+function riskCopy(level: string) {
+  const normalized = level.toUpperCase();
+  if (normalized === "CRITICAL") return { tone: "critical", seniorLabel: "매우 위험", headline: "지금 전화를 끊고 저장된 가족 번호로 다시 전화하세요." };
+  if (normalized === "HIGH") return { tone: "high", seniorLabel: "위험", headline: "가족 사칭 가능성이 있습니다." };
+  if (normalized === "MEDIUM") return { tone: "medium", seniorLabel: "주의", headline: "한 번 더 확인이 필요합니다." };
+  if (normalized === "LOW") return { tone: "low", seniorLabel: "낮음", headline: "안전해 보입니다. 그래도 돈 요구는 다시 확인하세요." };
+  return { tone: "unknown", seniorLabel: "확인 불가", headline: "확인이 어렵습니다. 저장된 가족 번호로 다시 전화하세요." };
+}
+
+function faceResultCopy(score: number | null, result?: string) {
+  if (score === null || !result || result === "WAITING") return { senior: "가족 얼굴을 확인하고 있습니다." };
+  if (score >= 80) return { senior: "등록된 가족일 가능성이 높습니다. 그래도 돈 요구는 다시 확인하세요." };
+  if (score >= 55) return { senior: "얼굴 확인만으로 판단하기 어렵습니다. 저장된 가족 번호로 다시 전화하세요." };
+  return { senior: "등록된 가족과 다를 수 있습니다. 통화를 중단하고 보호자에게 확인하세요." };
 }
 
 function loadWorkspace(): Workspace {

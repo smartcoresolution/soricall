@@ -4,18 +4,7 @@ let resolvedApiBaseUrl: string | null = null;
 
 function browserBaseCandidates(): string[] {
   if (typeof window === "undefined") return [];
-  const { protocol, hostname, origin } = window.location;
-  return [
-    `${origin}/soricall-api`,
-    "/soricall-api",
-    `${protocol}//${hostname}:8001`,
-    `${protocol}//${hostname}:8000`,
-    origin,
-    "http://localhost:8001",
-    "http://127.0.0.1:8001",
-    "http://localhost:8000",
-    "http://127.0.0.1:8000",
-  ];
+  return ["/soricall-api"];
 }
 
 function apiBaseCandidates(): string[] {
@@ -148,7 +137,7 @@ async function requestWithFallback(path: string, init?: RequestInit): Promise<Re
   for (const baseUrl of candidates) {
     try {
       const response = await fetch(`${baseUrl}${path}`, init);
-      if (response.ok || response.status < 500) {
+      if (response.ok || (response.status < 500 && response.status !== 404 && response.status !== 405)) {
         resolvedApiBaseUrl = baseUrl;
         return response;
       }

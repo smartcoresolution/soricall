@@ -8,8 +8,13 @@ export default defineConfig({
     host: "0.0.0.0",
     allowedHosts: true,
     proxy: {
-      "/api": "http://127.0.0.1:8001",
-      "/health": "http://127.0.0.1:8001",
+      "/soricall-api": {
+        target: "http://127.0.0.1:8000",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/soricall-api/, ""),
+      },
+      "/api": "http://127.0.0.1:8000",
+      "/health": "http://127.0.0.1:8000",
     },
   },
 });
