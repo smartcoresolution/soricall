@@ -26,8 +26,9 @@ class VoiceAnalyzeResponse(BaseModel):
     text: str
     language: str
     text_confidence: float
+    content_risk_score: int
+    content_reason_codes: list[str]
     risk_score: int
     risk_level: str
     reason_codes: list[str]
     message_for_senior: str
-

@@ -25,8 +25,13 @@ class LoginRequest(BaseModel):
 
 class AuthResponse(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     user: UserPublic
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str = Field(min_length=32)
 
 
 class FamilyCreate(BaseModel):
@@ -92,6 +97,49 @@ class GuardianResponse(BaseModel):
     relation: str | None
     priority: int
     notify_enabled: bool
+
+
+class ProtectedCallUserCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    relation_code: str = Field(pattern="^(FATHER|MOTHER|GRANDFATHER|GRANDMOTHER|OTHER)$")
+    phone_number: str = Field(min_length=4)
+    user_id: str | None = None
+
+
+class ProtectedCallUserResponse(BaseModel):
+    id: str
+    family_id: str
+    name: str
+    member_type: str
+    relation_code: str
+    phone_number_last4: str | None
+    protection_status: str
+
+    model_config = {"from_attributes": True}
+
+
+class ConfirmationContactCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    relation_code: str = Field(pattern="^(SON|DAUGHTER|GRANDSON|GRANDDAUGHTER|SPOUSE|OTHER)$")
+    phone_number: str = Field(min_length=4)
+    user_id: str | None = None
+    is_primary_contact: bool = False
+    notification_priority: int = Field(default=1, ge=1, le=10)
+    notify_enabled: bool = True
+
+
+class ConfirmationContactResponse(BaseModel):
+    id: str
+    family_id: str
+    name: str
+    member_type: str
+    relation_code: str | None
+    phone_number_last4: str | None
+    is_primary_contact: bool
+    notification_priority: int
+    notify_enabled: bool
+
+    model_config = {"from_attributes": True}
 
     model_config = {"from_attributes": True}
 
@@ -230,6 +278,118 @@ class CallEvaluateResponse(BaseModel):
     action_recommended: str
     reason_codes: list[str]
     message_for_senior: str
+
+
+class CallSessionCreate(BaseModel):
+    senior_id: str
+    phone_number: str = Field(min_length=1)
+    direction: str = Field(default="INCOMING", pattern="^(INCOMING|OUTGOING)$")
+
+
+class CallSessionCreateResponse(BaseModel):
+    call_session_id: str
+    family_number_matched: bool
+    matched_family_member_id: str | None
+    suspected: bool
+    status: str
+    risk_decision_id: str
+    risk_score: int
+    risk_level: str
+    decision: str
+    reason_codes: list[str]
+    response_action_id: str
+
+
+class CallAnalysisSubmit(BaseModel):
+    speaker_similarity: float = Field(ge=0, le=1)
+    spoof_probability: float = Field(ge=0, le=1)
+    content_risk_score: int = Field(ge=0, le=100)
+    content_reason_codes: list[str] = Field(default_factory=list)
+    face_match_score: int | None = Field(default=None, ge=0, le=100)
+    model_versions: dict[str, str] = Field(default_factory=dict)
+
+
+class CallAnalysisSubmitResponse(BaseModel):
+    call_session_id: str
+    risk_decision_id: str
+    sequence: int
+    risk_score: int
+    risk_level: str
+    decision: str
+    reason_codes: list[str]
+    response_action_id: str
+
+
+class CallVoiceAnalysisRequest(BaseModel):
+    voice_profile_id: str
+    audio_ref: str = Field(min_length=1)
+
+
+class CallVoiceAnalysisResponse(CallAnalysisSubmitResponse):
+    transcript: str
+    transcript_language: str
+    transcript_confidence: float
+    speaker_similarity: float
+    spoof_probability: float
+
+
+class ResponseActionResult(BaseModel):
+    status: str = Field(pattern="^(EXECUTED|FAILED|SKIPPED)$")
+    failure_reason: str | None = None
+
+
+class ResponseActionResultResponse(BaseModel):
+    response_action_id: str
+    call_session_id: str
+    action: str
+    status: str
+    failure_reason: str | None
+
+    model_config = {"from_attributes": True}
+
+
+class FamilyConfirmationCreate(BaseModel):
+    family_member_id: str | None = None
+    guardian_id: str | None = None
+    channel: str = Field(default="PUSH", pattern="^(PUSH|SMS|CALL)$")
+    expires_in_seconds: int = Field(default=300, ge=30, le=3600)
+
+
+class FamilyConfirmationCreateResponse(BaseModel):
+    confirmation_id: str
+    call_session_id: str
+    status: str
+    channel: str
+    expires_at: str
+
+
+class FamilyConfirmationRespond(BaseModel):
+    response: str = Field(pattern="^(CALLED|NOT_CALLED|UNKNOWN)$")
+
+
+class FamilyConfirmationRespondResponse(BaseModel):
+    confirmation_id: str
+    call_session_id: str
+    status: str
+    response: str
+    risk_decision_id: str
+    risk_score: int
+    risk_level: str
+    decision: str
+    reason_codes: list[str]
+    response_action_id: str
+
+
+class PushTokenRegister(BaseModel):
+    token: str = Field(min_length=1)
+    platform: str = Field(default="ANDROID", pattern="^(ANDROID|IOS|WEB)$")
+
+
+class PushTokenResponse(BaseModel):
+    id: str
+    guardian_id: str
+    platform: str
+    active: bool
 
 
 class RiskNumberCreate(BaseModel):

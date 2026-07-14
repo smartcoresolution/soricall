@@ -1,6 +1,11 @@
 const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL;
 
 let resolvedApiBaseUrl: string | null = null;
+let accessToken: string | null = null;
+
+export function setApiAccessToken(token: string | null): void {
+  accessToken = token;
+}
 
 function browserBaseCandidates(): string[] {
   if (typeof window === "undefined") return [];
@@ -136,7 +141,9 @@ async function requestWithFallback(path: string, init?: RequestInit): Promise<Re
 
   for (const baseUrl of candidates) {
     try {
-      const response = await fetch(`${baseUrl}${path}`, init);
+      const headers = new Headers(init?.headers);
+      if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+      const response = await fetch(`${baseUrl}${path}`, { ...init, headers });
       if (response.ok || (response.status < 500 && response.status !== 404 && response.status !== 405)) {
         resolvedApiBaseUrl = baseUrl;
         return response;

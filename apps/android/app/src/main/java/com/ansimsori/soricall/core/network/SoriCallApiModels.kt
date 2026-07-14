@@ -1,5 +1,20 @@
 package com.ansimsori.soricall.core.network
 
+data class AuthSessionDto(
+    val accessToken: String,
+    val refreshToken: String,
+    val userId: String,
+    val displayName: String,
+)
+
+data class ProtectedUserCreateDto(val name: String, val phoneNumber: String, val relationCode: String)
+data class ConfirmationContactCreateDto(
+    val name: String,
+    val phoneNumber: String,
+    val relationCode: String,
+    val primary: Boolean,
+)
+
 data class RegisterRequestDto(
     val email: String,
     val password: String,
@@ -44,6 +59,15 @@ data class CallEvaluateResponseDto(
     val messageForSenior: String,
 )
 
+data class CallSessionResponseDto(
+    val callSessionId: String,
+    val responseActionId: String,
+    val riskScore: Int,
+    val riskLevel: String,
+    val decision: String,
+    val reasonCodes: List<String>,
+)
+
 data class VoiceProfileCreateDto(
     val familyMemberId: String,
     val displayName: String,
@@ -63,4 +87,3 @@ data class EmergencyRespondRequestDto(
     val notificationId: String,
     val response: String,
 )
-

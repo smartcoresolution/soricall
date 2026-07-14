@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import time
+import secrets
 from typing import Any
 
 from app.core.config import get_settings
@@ -42,7 +43,11 @@ def phone_last4(phone_number: str) -> str:
 def create_access_token(subject: str, expires_in_seconds: int = 3600) -> str:
     settings = get_settings()
     header = {"alg": "HS256", "typ": "JWT"}
-    payload = {"sub": subject, "exp": int(time.time()) + expires_in_seconds}
+    payload = {
+        "sub": subject,
+        "exp": int(time.time()) + expires_in_seconds,
+        "jti": secrets.token_hex(16),
+    }
     signing_input = ".".join([_b64_json(header), _b64_json(payload)])
     signature = hmac.new(
         settings.jwt_secret.encode("utf-8"),
@@ -50,6 +55,14 @@ def create_access_token(subject: str, expires_in_seconds: int = 3600) -> str:
         hashlib.sha256,
     ).digest()
     return f"{signing_input}.{_b64(signature)}"
+
+
+def create_refresh_token() -> str:
+    return secrets.token_urlsafe(48)
+
+
+def hash_refresh_token(token: str) -> str:
+    return hash_value(token, salt="refresh-token")
 
 
 def decode_access_token(token: str) -> dict[str, Any] | None:
@@ -84,4 +97,3 @@ def _b64(value: bytes) -> str:
 def _b64_decode(value: str) -> bytes:
     padding = "=" * (-len(value) % 4)
     return base64.urlsafe_b64decode(value + padding)
-

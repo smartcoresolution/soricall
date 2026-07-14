@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     service_name: str = "soricall-api"
     database_url: str = "sqlite:///./soricall.db"
     ai_service_url: str = "http://localhost:8100"
+    fcm_project_id: str | None = None
+    fcm_access_token: str | None = None
     jwt_secret: str = "change-me-in-production"
     jwt_access_token_expire_minutes: int = 60
     jwt_refresh_token_expire_days: int = 14

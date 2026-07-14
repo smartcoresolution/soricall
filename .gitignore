@@ -40,3 +40,7 @@ local.properties
 .lesshst
 .vim/
 .viminfo
+# Local development toolchains and Android user state
+/.local/
+/.android/
+/.config/

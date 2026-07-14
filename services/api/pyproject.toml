@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "SoriCall FastAPI backend"
 requires-python = ">=3.10"
 dependencies = [
+    "alembic>=1.13.0",
     "fastapi>=0.111.0",
     "email-validator>=2.0.0",
     "psycopg[binary]>=3.2.0",

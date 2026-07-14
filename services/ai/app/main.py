@@ -65,6 +65,8 @@ def analyze_voice(request: VoiceAnalyzeRequest) -> VoiceAnalyzeResponse:
         text=result.text,
         language=result.language,
         text_confidence=result.text_confidence,
+        content_risk_score=result.content_risk_score,
+        content_reason_codes=result.content_reason_codes,
         risk_score=result.risk_score,
         risk_level=result.risk_level,
         reason_codes=result.reason_codes,

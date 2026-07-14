@@ -2,11 +2,24 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.v1 import admin, auth, calls, emergency, face_video, families, risk_events, seniors, voice_profiles
+from app.api.v1 import (
+    admin,
+    auth,
+    call_sessions,
+    calls,
+    emergency,
+    face_video,
+    families,
+    risk_events,
+    seniors,
+    voice_profiles,
+)
 from app.core.config import get_settings
-from app.core.database import init_db
+from app.core.database import SessionLocal, init_db
+from app.core.authorization import PROTECTED_PREFIXES, authenticate_request, authorized_for_request
 
 
 settings = get_settings()
@@ -58,6 +71,23 @@ async def development_cors(request: Request, call_next):
     return response
 
 
+@app.middleware("http")
+async def patent_api_authorization(request: Request, call_next):
+    if not request.url.path.startswith(PROTECTED_PREFIXES) or request.url.path.startswith("/api/v1/auth/"):
+        return await call_next(request)
+    db = SessionLocal()
+    try:
+        user = authenticate_request(request, db)
+        if not user:
+            return JSONResponse(status_code=401, content={"detail": "authentication required"})
+        if not await authorized_for_request(request, db, user):
+            return JSONResponse(status_code=403, content={"detail": "family access denied"})
+        request.state.current_user_id = user.id
+        return await call_next(request)
+    finally:
+        db.close()
+
+
 @app.get("/health", tags=["health"])
 def health() -> dict[str, str]:
     return {"status": "ok", "service": settings.service_name}
@@ -67,6 +97,9 @@ app.include_router(auth.router, prefix="/api/v1")
 app.include_router(families.router, prefix="/api/v1")
 app.include_router(seniors.router, prefix="/api/v1")
 app.include_router(calls.router, prefix="/api/v1")
+app.include_router(call_sessions.router, prefix="/api/v1")
+app.include_router(call_sessions.confirmation_router, prefix="/api/v1")
+app.include_router(call_sessions.push_router, prefix="/api/v1")
 app.include_router(risk_events.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 app.include_router(emergency.router, prefix="/api/v1")

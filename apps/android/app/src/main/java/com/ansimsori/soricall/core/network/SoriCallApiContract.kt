@@ -1,6 +1,18 @@
 package com.ansimsori.soricall.core.network
 
 interface SoriCallApiContract {
+    suspend fun register(email: String, password: String, displayName: String): AuthSessionDto
+    suspend fun login(email: String, password: String): AuthSessionDto
+    suspend fun createFamily(name: String, createdBy: String): String
+    suspend fun createProtectedUser(familyId: String, request: ProtectedUserCreateDto): String
+    suspend fun createConfirmationContact(familyId: String, protectedUserId: String, request: ConfirmationContactCreateDto): String
+
+    suspend fun validateSenior(seniorId: String): Boolean
+
+    suspend fun createCallSession(seniorId: String, phoneNumber: String): CallSessionResponseDto
+
+    suspend fun reportActionResult(callSessionId: String, actionId: String, status: String)
+
     suspend fun evaluateCall(request: CallEvaluateRequestDto): CallEvaluateResponseDto
 
     suspend fun createVoiceProfile(request: VoiceProfileCreateDto): String
@@ -11,4 +23,3 @@ interface SoriCallApiContract {
 
     suspend fun respondToEmergency(request: EmergencyRespondRequestDto): String
 }
-

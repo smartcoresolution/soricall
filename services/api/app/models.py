@@ -1,7 +1,19 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CHAR, DateTime, ForeignKey, Integer, String, Text, TypeDecorator, func
+from sqlalchemy import (
+    Boolean,
+    CHAR,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    TypeDecorator,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -47,6 +59,17 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[str] = mapped_column(GUID(), primary_key=True, default=new_uuid)
+    user_id: Mapped[str] = mapped_column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(Text, unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Family(Base):
     __tablename__ = "families"
 
@@ -66,6 +89,11 @@ class FamilyMember(Base):
     user_id: Mapped[str | None] = mapped_column(GUID(), ForeignKey("users.id"))
     name: Mapped[str] = mapped_column(String(100))
     relation: Mapped[str | None] = mapped_column(String(50))
+    member_type: Mapped[str] = mapped_column(String(40), default="FAMILY_CONFIRMATION_CONTACT")
+    relation_code: Mapped[str | None] = mapped_column(String(40))
+    is_primary_contact: Mapped[bool] = mapped_column(Boolean, default=False)
+    notification_priority: Mapped[int] = mapped_column(Integer, default=1)
+    notify_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     phone_number: Mapped[str | None] = mapped_column(String(50))
     phone_number_hash: Mapped[str | None] = mapped_column(Text)
     phone_number_last4: Mapped[str | None] = mapped_column(String(4))
@@ -80,6 +108,9 @@ class Senior(Base):
     family_id: Mapped[str] = mapped_column(GUID(), ForeignKey("families.id", ondelete="CASCADE"))
     user_id: Mapped[str | None] = mapped_column(GUID(), ForeignKey("users.id"))
     name: Mapped[str] = mapped_column(String(100))
+    member_type: Mapped[str] = mapped_column(String(40), default="PROTECTED_CALL_USER")
+    relation_code: Mapped[str] = mapped_column(String(40), default="OTHER")
+    protection_status: Mapped[str] = mapped_column(String(30), default="PREPARING")
     phone_number: Mapped[str | None] = mapped_column(String(50))
     phone_number_hash: Mapped[str | None] = mapped_column(Text)
     phone_number_last4: Mapped[str | None] = mapped_column(String(4))
@@ -194,6 +225,135 @@ class CallEvent(Base):
     risk_level: Mapped[str] = mapped_column(String(20), default="LOW")
     action_taken: Mapped[str | None] = mapped_column(String(50))
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CallSession(Base):
+    __tablename__ = "call_sessions"
+
+    id: Mapped[str] = mapped_column(GUID(), primary_key=True, default=new_uuid)
+    senior_id: Mapped[str] = mapped_column(GUID(), ForeignKey("seniors.id", ondelete="CASCADE"))
+    call_event_id: Mapped[str | None] = mapped_column(GUID(), ForeignKey("call_events.id"))
+    caller_number_hash: Mapped[str] = mapped_column(Text, index=True)
+    caller_number_last4: Mapped[str] = mapped_column(String(4))
+    direction: Mapped[str] = mapped_column(String(20), default="INCOMING")
+    family_number_matched: Mapped[bool] = mapped_column(Boolean, default=False)
+    matched_family_member_id: Mapped[str | None] = mapped_column(
+        GUID(),
+        ForeignKey("family_members.id"),
+    )
+    suspected: Mapped[bool] = mapped_column(Boolean, default=True)
+    status: Mapped[str] = mapped_column(String(30), default="RECEIVED")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class FamilyConfirmation(Base):
+    __tablename__ = "family_confirmations"
+
+    id: Mapped[str] = mapped_column(GUID(), primary_key=True, default=new_uuid)
+    call_session_id: Mapped[str] = mapped_column(
+        GUID(),
+        ForeignKey("call_sessions.id", ondelete="CASCADE"),
+        index=True,
+    )
+    family_member_id: Mapped[str | None] = mapped_column(GUID(), ForeignKey("family_members.id"))
+    guardian_id: Mapped[str | None] = mapped_column(GUID(), ForeignKey("guardians.id"))
+    notification_id: Mapped[str | None] = mapped_column(
+        GUID(),
+        ForeignKey("emergency_notifications.id"),
+    )
+    channel: Mapped[str] = mapped_column(String(20), default="PUSH")
+    status: Mapped[str] = mapped_column(String(30), default="PENDING")
+    response: Mapped[str | None] = mapped_column(String(30))
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DevicePushToken(Base):
+    __tablename__ = "device_push_tokens"
+
+    id: Mapped[str] = mapped_column(GUID(), primary_key=True, default=new_uuid)
+    guardian_id: Mapped[str] = mapped_column(GUID(), ForeignKey("guardians.id", ondelete="CASCADE"), index=True)
+    token: Mapped[str] = mapped_column(Text, unique=True)
+    platform: Mapped[str] = mapped_column(String(20), default="ANDROID")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class PushDelivery(Base):
+    __tablename__ = "push_deliveries"
+
+    id: Mapped[str] = mapped_column(GUID(), primary_key=True, default=new_uuid)
+    confirmation_id: Mapped[str] = mapped_column(GUID(), ForeignKey("family_confirmations.id", ondelete="CASCADE"), index=True)
+    push_token_id: Mapped[str] = mapped_column(GUID(), ForeignKey("device_push_tokens.id", ondelete="CASCADE"))
+    status: Mapped[str] = mapped_column(String(30), default="PENDING")
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    provider_message_id: Mapped[str | None] = mapped_column(Text)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class RiskDecision(Base):
+    __tablename__ = "risk_decisions"
+    __table_args__ = (
+        UniqueConstraint("call_session_id", "sequence", name="uq_risk_decision_session_sequence"),
+    )
+
+    id: Mapped[str] = mapped_column(GUID(), primary_key=True, default=new_uuid)
+    call_session_id: Mapped[str] = mapped_column(
+        GUID(),
+        ForeignKey("call_sessions.id", ondelete="CASCADE"),
+        index=True,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, default=1)
+    number_mismatch: Mapped[bool] = mapped_column(Boolean, default=True)
+    speaker_similarity: Mapped[float | None] = mapped_column(Float)
+    spoof_probability: Mapped[float | None] = mapped_column(Float)
+    content_risk_score: Mapped[int | None] = mapped_column(Integer)
+    family_response: Mapped[str | None] = mapped_column(String(30))
+    face_match_score: Mapped[int | None] = mapped_column(Integer)
+    voice_profile_id: Mapped[str | None] = mapped_column(GUID(), ForeignKey("voice_profiles.id"))
+    transcript: Mapped[str | None] = mapped_column(Text)
+    transcript_language: Mapped[str | None] = mapped_column(String(20))
+    transcript_confidence: Mapped[float | None] = mapped_column(Float)
+    risk_score: Mapped[int] = mapped_column(Integer)
+    risk_level: Mapped[str] = mapped_column(String(20))
+    decision: Mapped[str] = mapped_column(String(30))
+    reason_codes: Mapped[str] = mapped_column(Text, default="")
+    policy_version: Mapped[str] = mapped_column(String(50), default="patent-v1")
+    model_versions_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ResponseAction(Base):
+    __tablename__ = "response_actions"
+
+    id: Mapped[str] = mapped_column(GUID(), primary_key=True, default=new_uuid)
+    call_session_id: Mapped[str] = mapped_column(
+        GUID(),
+        ForeignKey("call_sessions.id", ondelete="CASCADE"),
+        index=True,
+    )
+    risk_decision_id: Mapped[str] = mapped_column(
+        GUID(),
+        ForeignKey("risk_decisions.id", ondelete="CASCADE"),
+    )
+    action: Mapped[str] = mapped_column(String(30))
+    status: Mapped[str] = mapped_column(String(30), default="PENDING")
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class RiskNumber(Base):
