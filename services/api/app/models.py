@@ -101,6 +101,21 @@ class FamilyMember(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class EnrollmentInvitation(Base):
+    __tablename__ = "enrollment_invitations"
+
+    id: Mapped[str] = mapped_column(GUID(), primary_key=True, default=new_uuid)
+    family_id: Mapped[str] = mapped_column(GUID(), ForeignKey("families.id", ondelete="CASCADE"), index=True)
+    family_member_id: Mapped[str] = mapped_column(GUID(), ForeignKey("family_members.id", ondelete="CASCADE"), index=True)
+    channel: Mapped[str] = mapped_column(String(20), default="SMS")
+    status: Mapped[str] = mapped_column(String(30), default="PENDING")
+    token_hash: Mapped[str] = mapped_column(Text, unique=True, index=True)
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Senior(Base):
     __tablename__ = "seniors"
 

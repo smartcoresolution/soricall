@@ -1,5 +1,6 @@
-const CACHE_NAME = "soricall-shell-v1";
-const SHELL_ASSETS = ["/", "/manifest.webmanifest", "/icon.svg"];
+const CACHE_NAME = "soricall-shell-v2";
+const APP_ROOT = new URL("./", self.location).pathname;
+const SHELL_ASSETS = [APP_ROOT, `${APP_ROOT}manifest.webmanifest`, `${APP_ROOT}icon.svg`];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_ASSETS)));
@@ -17,6 +18,9 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const request = event.request;
-  if (request.method !== "GET" || new URL(request.url).pathname.startsWith("/api/")) return;
-  event.respondWith(fetch(request).catch(() => caches.match(request).then((cached) => cached || caches.match("/"))));
+  const pathname = new URL(request.url).pathname;
+  if (request.method !== "GET" || pathname.startsWith("/api/") || pathname.startsWith("/soricall-api/")) return;
+  event.respondWith(
+    fetch(request).catch(() => caches.match(request).then((cached) => cached || caches.match(APP_ROOT))),
+  );
 });

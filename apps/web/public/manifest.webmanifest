@@ -1,15 +1,19 @@
 {
   "name": "SoriCall",
   "short_name": "SoriCall",
+  "id": "/soricall/",
   "description": "가족 사칭 전화 보호 모바일 웹앱",
-  "start_url": "/",
+  "start_url": ".",
+  "scope": ".",
   "display": "standalone",
   "background_color": "#f6f1e6",
   "theme_color": "#0f7770",
   "orientation": "portrait",
+  "categories": ["security", "utilities", "health"],
+  "lang": "ko-KR",
   "icons": [
     {
-      "src": "/icon.svg",
+      "src": "icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"

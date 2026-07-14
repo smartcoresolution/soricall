@@ -211,4 +211,29 @@
 3. Backend Alembic migration 도입
 4. Web app Docker service 추가 여부 결정
 5. Android는 이후 Retrofit/Hilt/Room 연동
+# 2026-07-14 — 개발 웹앱 6·7·8번 가족 등록 흐름 및 백업
 
+## 완료 내용
+
+- 확인 가족을 여러 명 등록하고, 등록 요청을 발송하는 화면(6번)을 구현했다.
+- 초대받은 가족 본인이 직접 동의한 뒤 음성을 필수로 등록하고 얼굴 사진은 선택 등록하는 화면(7번)을 구현했다.
+- 초대별 응답 대기/등록 완료 상태, 개발용 등록 화면 열기, 링크 재전송과 홈 요약 화면(8번)을 구현했다.
+- 음성 등록 완료 시 해당 초대 상태를 `COMPLETED`로 갱신하도록 연결했다.
+- 기존 enrollment invitation API와 Alembic migration을 개발환경에서 사용하도록 정리했다.
+
+## 검증
+
+- `npm run build` 성공
+- Playwright 화면 6 테스트 통과
+- Playwright 화면 7 초대 발송 테스트 통과
+- Playwright 화면 8 등록현황/재전송 테스트 통과
+
+## 백업
+
+- `backups/soricall-work-20260714-2037.tgz`
+- `.git`, `node_modules`, Playwright 결과물은 제외했다.
+
+## 다음 작업
+
+- GitHub 인증 갱신 후 현재 브랜치 변경사항을 commit/push하고 PR을 생성한다.
+- 운영 전환 전 실제 SMS/카카오 알림 연동과 초대 토큰 기반 공개 등록 엔드포인트를 검토한다.

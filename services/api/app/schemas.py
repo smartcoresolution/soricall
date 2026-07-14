@@ -141,6 +141,20 @@ class ConfirmationContactResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
+
+class EnrollmentInvitationResponse(BaseModel):
+    id: str
+    family_id: str
+    family_member_id: str
+    family_member_name: str
+    relation_code: str | None
+    phone_number_last4: str | None
+    channel: str
+    status: str
+    sent_at: str
+    expires_at: str
+    enrollment_url: str | None = None
+
     model_config = {"from_attributes": True}
 
 

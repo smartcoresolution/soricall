@@ -11,6 +11,8 @@ venv/
 .env.development
 .env.production
 dist/
+test-results/
+playwright-report/
 build/
 node_modules/
 *.tsbuildinfo

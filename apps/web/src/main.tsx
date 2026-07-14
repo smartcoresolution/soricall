@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import {
   Activity, AlertTriangle, ArrowLeft, Bell, Check, CheckCircle2, ChevronRight,
@@ -11,8 +11,8 @@ import "./styles.css";
 import "./feedback.css";
 
 type Screen =
-  | "welcome" | "signup" | "consent" | "login" | "home" | "protected"
-  | "contacts" | "biometrics" | "normal" | "analysis" | "blocked"
+  | "welcome" | "signup" | "consent" | "signupComplete" | "login" | "home" | "protected"
+  | "contacts" | "invite" | "enrollmentStatus" | "biometrics" | "normal" | "analysis" | "blocked"
   | "confirm" | "history" | "admin";
 
 const protectedRelations = ["아버지", "어머니", "할아버지", "할머니", "기타"];
@@ -22,12 +22,42 @@ const contactRelationCodes: Record<string, string> = { 아들: "SON", 딸: "DAUG
 
 type AuthResponse = { access_token: string; refresh_token: string; user: UserPublic };
 type ProtectedUserResponse = { id: string };
+type ConfirmationContactResponse = { id: string; name: string };
+type VoiceProfileCreated = { id: string };
+type EnrollmentInvitation = {
+  id: string;
+  family_id: string;
+  family_member_id: string;
+  family_member_name: string;
+  relation_code: string | null;
+  phone_number_last4: string | null;
+  channel: string;
+  status: string;
+  sent_at: string;
+  expires_at: string;
+  enrollment_url: string | null;
+};
+type InstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
+};
+
+function userMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  if (message === "email already registered") return "이미 가입된 이메일입니다.";
+  if (message === "invalid email or password") return "이메일 또는 비밀번호가 올바르지 않습니다.";
+  if (message === "authentication required") return "로그인이 필요합니다.";
+  if (message === "family access denied") return "이 가족 정보에 접근할 권한이 없습니다.";
+  return message || "요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.";
+}
+
+const isValidMobilePhone = (value: string) => /^01[016789]-?\d{3,4}-?\d{4}$/.test(value.trim());
 
 function App() {
   const [screen, setScreen] = useState<Screen>("welcome");
   const [protectedRelation, setProtectedRelation] = useState("어머니");
   const [contactRelation, setContactRelation] = useState("딸");
-  const [agreed, setAgreed] = useState([true, true, true, true, false]);
+  const [agreed, setAgreed] = useState([false, false, false, false, false]);
   const [analysisStep, setAnalysisStep] = useState(2);
   const [signup, setSignup] = useState({ name: "", email: "", password: "", passwordConfirm: "" });
   const [login, setLogin] = useState({ email: "", password: "" });
@@ -36,19 +66,49 @@ function App() {
   const [session, setSession] = useState<AuthResponse | null>(null);
   const [familyId, setFamilyId] = useState<string | null>(null);
   const [protectedUserId, setProtectedUserId] = useState<string | null>(null);
+  const [enrollmentContact, setEnrollmentContact] = useState<ConfirmationContactResponse | null>(null);
+  const [enrollmentContacts, setEnrollmentContacts] = useState<ConfirmationContactResponse[]>([]);
+  const [invitations, setInvitations] = useState<EnrollmentInvitation[]>([]);
   const [busy, setBusy] = useState(false);
   const [apiError, setApiError] = useState("");
+  const [apiMessage, setApiMessage] = useState("");
+  const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
+
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, {
+        scope: import.meta.env.BASE_URL,
+      }).catch(() => undefined);
+    }
+    const captureInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as InstallPromptEvent);
+    };
+    window.addEventListener("beforeinstallprompt", captureInstallPrompt);
+    return () => window.removeEventListener("beforeinstallprompt", captureInstallPrompt);
+  }, []);
+
+  const installApp = async () => {
+    if (!installPrompt) {
+      setApiError("브라우저 메뉴에서 ‘앱 설치’ 또는 ‘홈 화면에 추가’를 선택해 주세요.");
+      return;
+    }
+    await installPrompt.prompt();
+    await installPrompt.userChoice;
+    setInstallPrompt(null);
+  };
 
   const runApi = async (action: () => Promise<void>) => {
-    setBusy(true); setApiError("");
-    try { await action(); } catch (error) { setApiError(error instanceof Error ? error.message : "요청을 처리하지 못했습니다."); }
+    if (busy) return;
+    setBusy(true); setApiError(""); setApiMessage("");
+    try { await action(); } catch (error) { setApiError(userMessage(error)); }
     finally { setBusy(false); }
   };
 
   const register = () => runApi(async () => {
     if (signup.password !== signup.passwordConfirm) throw new Error("비밀번호 확인이 일치하지 않습니다.");
     const auth = await apiPost<AuthResponse>("/api/v1/auth/register", { email: signup.email, password: signup.password, display_name: signup.name, role: "GUARDIAN" });
-    setApiAccessToken(auth.access_token); setSession(auth); setScreen("protected");
+    setApiAccessToken(auth.access_token); setSession(auth); setScreen("signupComplete");
   });
   const signIn = () => runApi(async () => {
     const auth = await apiPost<AuthResponse>("/api/v1/auth/login", login);
@@ -64,21 +124,90 @@ function App() {
     const member = await apiPost<ProtectedUserResponse>(`/api/v1/families/${currentFamilyId}/protected-call-users`, { name: protectedForm.name, phone_number: protectedForm.phone, relation_code: protectedRelationCodes[protectedRelation] });
     setProtectedUserId(member.id); setScreen("contacts");
   });
-  const saveContact = () => runApi(async () => {
+  const saveContact = (continueToBiometrics: boolean) => runApi(async () => {
     if (!familyId || !protectedUserId) throw new Error("보호받을 가족을 먼저 등록해 주세요.");
-    await apiPost(`/api/v1/families/${familyId}/protected-call-users/${protectedUserId}/confirmation-contacts`, { name: contactForm.name, phone_number: contactForm.phone, relation_code: contactRelationCodes[contactRelation], is_primary_contact: contactForm.primary, notification_priority: 1, notify_enabled: true });
-    setScreen("biometrics");
+    const contact = await apiPost<ConfirmationContactResponse>(`/api/v1/families/${familyId}/protected-call-users/${protectedUserId}/confirmation-contacts`, { name: contactForm.name, phone_number: contactForm.phone, relation_code: contactRelationCodes[contactRelation], is_primary_contact: contactForm.primary, notification_priority: 1, notify_enabled: true });
+    setEnrollmentContact(contact);
+    setEnrollmentContacts((current) => [...current, contact]);
+    if (continueToBiometrics) {
+      setScreen("invite");
+    } else {
+      setContactForm({ name: "", phone: "", primary: false });
+      setContactRelation("아들");
+      setApiMessage("확인 가족을 추가했습니다.");
+    }
   });
+  const sendEnrollmentInvitations = () => runApi(async () => {
+    if (!familyId || enrollmentContacts.length === 0) throw new Error("등록 요청을 보낼 가족이 없습니다.");
+    const sent = await Promise.all(enrollmentContacts.map((contact) =>
+      apiPost<EnrollmentInvitation>(`/api/v1/families/${familyId}/members/${contact.id}/enrollment-invitations`, {}),
+    ));
+    setInvitations(sent);
+    setScreen("enrollmentStatus");
+  });
+  const resendInvitation = (invitationId: string) => runApi(async () => {
+    if (!familyId) throw new Error("가족 정보가 없습니다.");
+    const resent = await apiPost<EnrollmentInvitation>(`/api/v1/families/${familyId}/enrollment-invitations/${invitationId}/resend`, {});
+    setInvitations((current) => current.map((item) => item.id === invitationId ? resent : item));
+    setApiMessage("등록 링크를 다시 보냈습니다.");
+  });
+  const saveBiometrics = (audioRef: string, durationMs: number, faceImageRef: string | null) => runApi(async () => {
+    if (!enrollmentContact) throw new Error("음성을 등록할 확인 가족 정보가 없습니다.");
+    const profile = await apiPost<VoiceProfileCreated>("/api/v1/voice-profiles", {
+      family_member_id: enrollmentContact.id,
+      display_name: enrollmentContact.name,
+    });
+    await apiPost(`/api/v1/voice-profiles/${profile.id}/samples`, {
+      audio_ref: audioRef,
+      duration_ms: durationMs,
+      mime_type: "audio/webm",
+      purpose: "ENROLLMENT",
+    });
+    await apiPost(`/api/v1/voice-profiles/${profile.id}/enroll`, { audio_ref: audioRef });
+    if (faceImageRef) {
+      await apiPost("/api/v1/face-profiles", {
+        family_member_id: enrollmentContact.id,
+        display_name: enrollmentContact.name,
+        image_ref: faceImageRef,
+        consent_accepted: true,
+      });
+    }
+    setInvitations((current) => current.map((item) => item.family_member_id === enrollmentContact.id ? { ...item, status: "COMPLETED" } : item));
+    setScreen("home");
+  });
+  const openFamilyEnrollment = (invitation: EnrollmentInvitation) => {
+    const contact = enrollmentContacts.find((item) => item.id === invitation.family_member_id) ?? { id: invitation.family_member_id, name: invitation.family_member_name };
+    setEnrollmentContact(contact);
+    setScreen("biometrics");
+  };
 
   const title = useMemo(() => ({
-    signup: "회원가입", consent: "서비스 이용 동의", login: "로그인",
-    protected: "통화 보호 가족 등록", contacts: "확인 가족 등록",
-    biometrics: "가족 정보 등록", normal: "안전한 전화", analysis: "의심전화 분석",
+    signup: "회원가입", consent: "서비스 이용 동의", signupComplete: "가입 완료", login: "로그인",
+    protected: "통화 보호 가족 등록", contacts: "확인 가족 등록", invite: "등록 요청 보내기",
+    enrollmentStatus: "가족 등록 현황", biometrics: "가족 본인 등록", normal: "안전한 전화", analysis: "의심전화 분석",
     blocked: "고위험 전화 차단", confirm: "가족 확인 요청", history: "통화기록",
     admin: "관리자 페이지", home: "통화 보호 홈", welcome: "",
   }[screen]), [screen]);
 
-  const goBack = () => setScreen(screen === "signup" ? "welcome" : "home");
+  const goBack = () => {
+    const previous: Partial<Record<Screen, Screen>> = {
+      signup: "welcome",
+      login: "welcome",
+      consent: "signup",
+      protected: "home",
+      contacts: "protected",
+      invite: "contacts",
+      enrollmentStatus: "invite",
+      biometrics: "contacts",
+      normal: "home",
+      analysis: "home",
+      blocked: "analysis",
+      confirm: "blocked",
+      history: "home",
+      admin: "home",
+    };
+    setScreen(previous[screen] ?? "welcome");
+  };
 
   return (
     <div className="site-shell">
@@ -88,24 +217,27 @@ function App() {
           <span>SoriCall<small>안심소리 가족콜</small></span>
         </button>
         {screen !== "welcome" && <div className="top-title">{title}</div>}
-        <div className="top-actions">
+        {session && <div className="top-actions">
           <button className="icon-button"><Bell size={20} /><i /></button>
           <button className="avatar">김</button>
-        </div>
+        </div>}
       </header>
 
       <main className={`page ${screen === "welcome" ? "welcome-page" : ""}`}>
-        {screen !== "welcome" && screen !== "home" && (
+        {screen !== "welcome" && screen !== "home" && screen !== "signupComplete" && (
           <button className="back-button" onClick={goBack}><ArrowLeft size={18} /> 이전</button>
         )}
-        {screen === "welcome" && <Welcome onSignup={() => setScreen("signup")} onLogin={() => setScreen("login")} />}
+        {screen === "welcome" && <Welcome onSignup={() => setScreen("signup")} onLogin={() => setScreen("login")} onInstall={installApp} />}
         {screen === "signup" && <Signup value={signup} setValue={setSignup} onNext={() => setScreen("consent")} />}
         {screen === "consent" && <Consent agreed={agreed} setAgreed={setAgreed} onNext={register} />}
+        {screen === "signupComplete" && <SignupComplete onNext={() => setScreen("protected")} />}
         {screen === "login" && <Login value={login} setValue={setLogin} onNext={signIn} />}
         {screen === "protected" && <ProtectedRegistration value={protectedForm} setValue={setProtectedForm} relation={protectedRelation} setRelation={setProtectedRelation} onNext={saveProtectedUser} />}
-        {screen === "contacts" && <ContactRegistration value={contactForm} setValue={setContactForm} relation={contactRelation} setRelation={setContactRelation} onNext={saveContact} />}
-        {screen === "biometrics" && <Biometrics onDone={() => setScreen("home")} />}
-        {screen === "home" && <Dashboard navigate={setScreen} />}
+        {screen === "contacts" && <ContactRegistration value={contactForm} setValue={setContactForm} relation={contactRelation} setRelation={setContactRelation} onAdd={() => saveContact(false)} onNext={() => saveContact(true)} />}
+        {screen === "invite" && <EnrollmentInvite contacts={enrollmentContacts} onSend={sendEnrollmentInvitations} />}
+        {screen === "enrollmentStatus" && <EnrollmentStatus invitations={invitations} onResend={resendInvitation} onOpen={openFamilyEnrollment} onHome={() => setScreen("home")} />}
+        {screen === "biometrics" && <Biometrics contactName={enrollmentContact?.name ?? "확인 가족"} onDone={saveBiometrics} />}
+        {screen === "home" && <Dashboard navigate={setScreen} invitations={invitations} />}
         {screen === "normal" && <NormalCall onHome={() => setScreen("home")} />}
         {screen === "analysis" && <Analysis step={analysisStep} setStep={setAnalysisStep} onBlock={() => setScreen("blocked")} />}
         {screen === "blocked" && <BlockedCall onConfirm={() => setScreen("confirm")} />}
@@ -113,9 +245,9 @@ function App() {
         {screen === "history" && <HistoryPage />}
         {screen === "admin" && <AdminPage />}
       </main>
-      {(busy || apiError) && <div className={`api-feedback ${apiError ? "error" : ""}`}>{busy ? "안전하게 저장하고 있습니다…" : apiError}<button onClick={() => setApiError("")}><X /></button></div>}
+      {(busy || apiError || apiMessage) && <div className={`api-feedback ${apiError ? "error" : ""}`}>{busy ? "안전하게 저장하고 있습니다…" : apiError || apiMessage}<button onClick={() => { setApiError(""); setApiMessage(""); }}><X /></button></div>}
 
-      {!(["welcome", "signup", "consent", "login", "normal", "analysis", "blocked", "confirm"] as Screen[]).includes(screen) && (
+      {!([ "welcome", "signup", "consent", "signupComplete", "login", "protected", "contacts", "invite", "enrollmentStatus", "biometrics", "normal", "analysis", "blocked", "confirm"] as Screen[]).includes(screen) && (
         <nav className="bottom-nav">
           <NavItem active={screen === "home"} icon={<Home />} label="홈" onClick={() => setScreen("home")} />
           <NavItem active={screen === "protected" || screen === "contacts"} icon={<Users />} label="가족" onClick={() => setScreen("protected")} />
@@ -127,13 +259,13 @@ function App() {
   );
 }
 
-function Welcome({ onSignup, onLogin }: { onSignup: () => void; onLogin: () => void }) {
+function Welcome({ onSignup, onLogin, onInstall }: { onSignup: () => void; onLogin: () => void; onInstall: () => void }) {
   return <div className="hero-grid">
     <section className="hero-copy">
       <span className="eyebrow"><Sparkles size={16} /> AI 가족 사칭 전화 보호</span>
       <h1>부모님의 전화를<br/><em>보이스피싱으로부터</em><br/>지켜드립니다.</h1>
       <p>가족의 전화번호와 목소리를 기억하고, 의심되는 통화는 가족에게 한 번 더 확인합니다.</p>
-      <div className="hero-actions"><button className="primary large" onClick={onSignup}>통화 보호 시작하기 <ChevronRight /></button><button className="text-button" onClick={onLogin}>이미 가입했어요</button></div>
+      <div className="hero-actions"><button className="primary large" onClick={onSignup}>통화 보호 시작하기 <ChevronRight /></button><button className="text-button" onClick={onLogin}>이미 가입했어요</button><button className="secondary" onClick={onInstall}>앱으로 설치하기</button></div>
       <div className="trust-row"><span><CheckCircle2 /> 가족 번호 확인</span><span><CheckCircle2 /> AI 음성 분석</span><span><CheckCircle2 /> 가족 즉시 알림</span></div>
     </section>
     <section className="phone-preview">
@@ -146,8 +278,8 @@ function Welcome({ onSignup, onLogin }: { onSignup: () => void; onLogin: () => v
 }
 
 function Signup({ value, setValue, onNext }: { value: {name:string;email:string;password:string;passwordConfirm:string}; setValue: React.Dispatch<React.SetStateAction<typeof value>>; onNext: () => void }) { return <FormCard step="1 / 3" title="가족의 안심을 시작해요" description="가입 정보는 통화 보호와 가족 확인에만 사용됩니다.">
-  <Field label="이름" placeholder="이름을 입력해 주세요" value={value.name} onChange={name => setValue(v => ({...v,name}))}/><Field label="이메일" placeholder="example@email.com" type="email" value={value.email} onChange={email => setValue(v => ({...v,email}))}/><Field label="비밀번호" placeholder="8자 이상 입력해 주세요" type="password" value={value.password} onChange={password => setValue(v => ({...v,password}))}/><Field label="비밀번호 확인" placeholder="한 번 더 입력해 주세요" type="password" value={value.passwordConfirm} onChange={passwordConfirm => setValue(v => ({...v,passwordConfirm}))}/>
-  <button className="primary full" disabled={!value.name || !value.email || value.password.length < 8 || value.password !== value.passwordConfirm} onClick={onNext}>다음</button><p className="form-note"><LockKeyhole /> 개인정보는 암호화하여 안전하게 보관합니다.</p>
+  <Field label="이름" placeholder="이름을 입력해 주세요" value={value.name} onChange={name => setValue(v => ({...v,name}))}/><Field label="이메일" placeholder="example@email.com" type="email" value={value.email} onChange={email => setValue(v => ({...v,email}))}/>{value.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.email) && <span className="validation-error">올바른 이메일 주소를 입력해 주세요.</span>}<Field label="비밀번호" placeholder="8자 이상 입력해 주세요" type="password" value={value.password} onChange={password => setValue(v => ({...v,password}))}/>{value.password && value.password.length < 8 && <span className="validation-error">비밀번호는 8자 이상 입력해 주세요.</span>}<Field label="비밀번호 확인" placeholder="한 번 더 입력해 주세요" type="password" value={value.passwordConfirm} onChange={passwordConfirm => setValue(v => ({...v,passwordConfirm}))}/>{value.passwordConfirm && value.password !== value.passwordConfirm && <span className="validation-error">비밀번호 확인이 일치하지 않습니다.</span>}
+  <button className="primary full" disabled={!value.name.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.email) || value.password.length < 8 || value.password !== value.passwordConfirm} onClick={onNext}>다음</button><p className="form-note"><LockKeyhole /> 개인정보는 암호화하여 안전하게 보관합니다.</p>
 </FormCard>; }
 
 function Consent({ agreed, setAgreed, onNext }: { agreed: boolean[]; setAgreed: (v: boolean[]) => void; onNext: () => void }) {
@@ -160,30 +292,108 @@ function Consent({ agreed, setAgreed, onNext }: { agreed: boolean[]; setAgreed: 
   </FormCard>;
 }
 
+function SignupComplete({ onNext }: { onNext: () => void }) {
+  return <CallStage tone="safe" icon={<CheckCircle2 />} eyebrow="회원가입 완료" title="안전하게 가입됐어요" description="이제 통화를 보호할 가족과 확인해 줄 가족을 등록해 주세요.">
+    <div className="info-box"><span><Shield /></span><p><b>가입 정보가 안전하게 저장됐습니다.</b><br/>가족 등록을 마치면 통화 보호 준비가 완료됩니다.</p></div>
+    <button className="primary full" onClick={onNext}>보호 가족 등록하기 <ChevronRight /></button>
+  </CallStage>;
+}
+
 function Login({ value, setValue, onNext }: { value:{email:string;password:string}; setValue:React.Dispatch<React.SetStateAction<typeof value>>; onNext: () => void }) { return <FormCard title="다시 만나서 반가워요" description="등록한 계정으로 로그인해 주세요."><Field label="이메일" placeholder="example@email.com" type="email" value={value.email} onChange={email => setValue(v => ({...v,email}))}/><Field label="비밀번호" placeholder="비밀번호" type="password" value={value.password} onChange={password => setValue(v => ({...v,password}))}/><div className="between"><label><input type="checkbox"/> 로그인 유지</label><button className="link">비밀번호 찾기</button></div><button className="primary full" disabled={!value.email || !value.password} onClick={onNext}>로그인</button></FormCard>; }
 
 function ProtectedRegistration({ value, setValue, relation, setRelation, onNext }: { value:{name:string;phone:string}; setValue:React.Dispatch<React.SetStateAction<typeof value>>; relation: string; setRelation: (v: string) => void; onNext: () => void }) { return <FormCard step="1 / 3" title="보이스피싱으로부터 누구의 전화를 보호할까요?" description="부모님 또는 조부모님의 휴대전화에 의심전화 경고와 차단을 제공합니다.">
-  <RelationGrid options={protectedRelations} value={relation} setValue={setRelation}/><Field label="성함" placeholder="예: 김영희" value={value.name} onChange={name => setValue(v => ({...v,name}))}/><Field label="휴대전화 번호" placeholder="010-0000-0000" type="tel" value={value.phone} onChange={phone => setValue(v => ({...v,phone}))}/>
-  <InfoBox icon={<Shield />}><b>정보 등록 후 보호할 가족의 휴대전화에서 로그인하면</b><br/>보이스피싱 통화 보호가 자동으로 시작됩니다.</InfoBox><button className="primary full" disabled={!value.name || value.phone.length < 4} onClick={onNext}>다음: 확인 가족 등록</button>
+  <RelationGrid options={protectedRelations} value={relation} setValue={setRelation}/><Field label="성함" placeholder="예: 김영희" value={value.name} onChange={name => setValue(v => ({...v,name}))}/><Field label="휴대전화 번호" placeholder="010-0000-0000" type="tel" value={value.phone} onChange={phone => setValue(v => ({...v,phone}))}/>{value.phone && !isValidMobilePhone(value.phone) && <span className="validation-error">올바른 휴대전화 번호를 입력해 주세요.</span>}
+  <InfoBox icon={<Shield />}><b>정보 등록 후 보호할 가족의 휴대전화에서 로그인하면</b><br/>보이스피싱 통화 보호가 자동으로 시작됩니다.</InfoBox><button className="primary full" disabled={!value.name.trim() || !isValidMobilePhone(value.phone)} onClick={onNext}>다음: 확인 가족 등록</button>
 </FormCard>; }
 
-function ContactRegistration({ value, setValue, relation, setRelation, onNext }: { value:{name:string;phone:string;primary:boolean}; setValue:React.Dispatch<React.SetStateAction<typeof value>>; relation: string; setRelation: (v: string) => void; onNext: () => void }) { return <FormCard step="2 / 3" title="의심전화를 확인해 줄 가족을 등록해 주세요" description="보호받을 가족에게 의심전화가 오면 실제 통화 여부를 확인합니다.">
-  <label className="section-label">보호받을 가족과의 관계</label><RelationGrid options={contactRelations} value={relation} setValue={setRelation}/><Field label="성함" placeholder="예: 김민지" value={value.name} onChange={name => setValue(v => ({...v,name}))}/><Field label="휴대전화 번호" placeholder="010-0000-0000" type="tel" value={value.phone} onChange={phone => setValue(v => ({...v,phone}))}/>
+function ContactRegistration({ value, setValue, relation, setRelation, onAdd, onNext }: { value:{name:string;phone:string;primary:boolean}; setValue:React.Dispatch<React.SetStateAction<typeof value>>; relation: string; setRelation: (v: string) => void; onAdd: () => void; onNext: () => void }) { const valid = Boolean(value.name.trim()) && isValidMobilePhone(value.phone); return <FormCard step="2 / 3" title="의심전화를 확인해 줄 가족을 등록해 주세요" description="보호받을 가족에게 의심전화가 오면 실제 통화 여부를 확인합니다.">
+  <label className="section-label">보호받을 가족과의 관계</label><RelationGrid options={contactRelations} value={relation} setValue={setRelation}/><Field label="성함" placeholder="예: 김민지" value={value.name} onChange={name => setValue(v => ({...v,name}))}/><Field label="휴대전화 번호" placeholder="010-0000-0000" type="tel" value={value.phone} onChange={phone => setValue(v => ({...v,phone}))}/>{value.phone && !isValidMobilePhone(value.phone) && <span className="validation-error">올바른 휴대전화 번호를 입력해 주세요.</span>}
   <label className="toggle-row"><span><b>가장 먼저 확인할 가족</b><small>의심전화 발생 시 첫 번째로 알림을 보냅니다.</small></span><input type="checkbox" checked={value.primary} onChange={e => setValue(v => ({...v,primary:e.target.checked}))}/></label>
-  <button className="secondary full"><Plus /> 확인 가족 한 명 더 추가</button><button className="primary full" disabled={!value.name || value.phone.length < 4} onClick={onNext}>다음: 가족 정보 등록</button>
+  <button className="secondary full" disabled={!valid} onClick={onAdd}><Plus /> 확인 가족 한 명 더 추가</button><button className="primary full" disabled={!valid} onClick={onNext}>다음: 가족 정보 등록</button>
 </FormCard>; }
 
-function Biometrics({ onDone }: { onDone: () => void }) { return <FormCard step="3 / 3" title="가족의 목소리를 등록해 주세요" description="등록 가족의 목소리와 의심전화의 목소리를 비교해 가족 사칭 가능성을 확인합니다.">
-  <div className="profile-select"><span className="person-icon">김</span><span><b>김민지 · 딸</b><small>음성 등록 필요</small></span><ChevronRight /></div>
-  <div className="record-card"><div className="mic-ring"><Mic /></div><b>아래 문장을 자연스럽게 읽어 주세요</b><p>“엄마, 오늘 저녁에 다시 전화드릴게요.”</p><div className="wave">{Array.from({length: 28}).map((_, i) => <i key={i} style={{height: `${12 + (i * 13) % 35}px`}}/>)}</div><button className="primary round"><Mic /> 녹음 시작</button></div>
-  <button className="optional-card"><Video /><span><b>얼굴정보도 등록할까요?</b><small>선택사항 · 나중에 등록할 수 있어요</small></span><ChevronRight /></button><button className="primary full" onClick={onDone}>등록 완료</button>
-</FormCard>; }
+function EnrollmentInvite({ contacts, onSend }: { contacts: ConfirmationContactResponse[]; onSend: () => void }) {
+  return <FormCard step="3 / 3" title="가족에게 등록 요청을 보내세요" description="가족이 자신의 휴대전화에서 직접 동의하고 목소리와 얼굴을 등록합니다.">
+    <InfoBox icon={<Shield />}><b>생체정보는 가족 본인이 직접 등록합니다.</b><br/>링크는 3일 동안 유효하며 문자로 전송됩니다.</InfoBox>
+    <div className="enrollment-list">{contacts.map((contact) => <div className="enrollment-person" key={contact.id}><span className="person-icon">{contact.name.slice(0, 1)}</span><span><b>{contact.name}</b><small>음성 필수 · 얼굴 선택</small></span><em>전송 준비</em></div>)}</div>
+    <button className="primary full" disabled={contacts.length === 0} onClick={onSend}><Bell /> 등록 요청 보내기</button>
+  </FormCard>;
+}
 
-function Dashboard({ navigate }: { navigate: (s: Screen) => void }) { return <div className="dashboard">
+function EnrollmentStatus({ invitations, onResend, onOpen, onHome }: { invitations: EnrollmentInvitation[]; onResend: (id: string) => void; onOpen: (invitation: EnrollmentInvitation) => void; onHome: () => void }) {
+  const labels: Record<string, string> = { PENDING: "응답 대기", COMPLETED: "등록 완료", EXPIRED: "링크 만료" };
+  return <FormCard title="가족 등록 현황" description="가족별 음성·얼굴 등록 진행 상태를 확인할 수 있습니다.">
+    <div className="enrollment-list">{invitations.map((invitation) => <div className="enrollment-person status" key={invitation.id}><span className="person-icon">{invitation.family_member_name.slice(0, 1)}</span><span><b>{invitation.family_member_name}</b><small>휴대전화 끝 {invitation.phone_number_last4 ?? "----"}</small></span><em className={invitation.status.toLowerCase()}>{labels[invitation.status] ?? invitation.status}</em>{invitation.status !== "COMPLETED" && <><button className="link" onClick={() => onOpen(invitation)}>등록 화면 열기</button><button className="link" onClick={() => onResend(invitation.id)}>링크 다시 보내기</button></>}</div>)}</div>
+    <InfoBox icon={<Bell />}><b>가족이 등록을 마치면 자동으로 상태가 변경됩니다.</b><br/>어르신은 별도로 음성이나 사진을 준비하지 않아도 됩니다.</InfoBox>
+    <button className="primary full" onClick={onHome}>안심 홈으로 이동</button>
+  </FormCard>;
+}
+
+function Biometrics({ contactName, onDone }: { contactName: string; onDone: (audioRef: string, durationMs: number, faceImageRef: string | null) => void }) {
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const startedAtRef = useRef(0);
+  const chunksRef = useRef<Blob[]>([]);
+  const [recording, setRecording] = useState(false);
+  const [audioRef, setAudioRef] = useState("");
+  const [durationMs, setDurationMs] = useState(0);
+  const [mediaError, setMediaError] = useState("");
+  const [faceImageRef, setFaceImageRef] = useState<string | null>(null);
+  const [familyConsent, setFamilyConsent] = useState(false);
+
+  const toggleRecording = async () => {
+    if (recording) {
+      recorderRef.current?.stop();
+      return;
+    }
+    setMediaError("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      chunksRef.current = [];
+      recorder.ondataavailable = (event) => { if (event.data.size) chunksRef.current.push(event.data); };
+      recorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        const reader = new FileReader();
+        reader.onloadend = () => setAudioRef(String(reader.result));
+        reader.readAsDataURL(blob);
+        setDurationMs(Math.max(1, Date.now() - startedAtRef.current));
+        setRecording(false);
+        stream.getTracks().forEach((track) => track.stop());
+      };
+      recorderRef.current = recorder;
+      startedAtRef.current = Date.now();
+      recorder.start();
+      setRecording(true);
+    } catch {
+      setMediaError("마이크 권한을 허용한 뒤 다시 시도해 주세요.");
+    }
+  };
+
+  const selectFace = (file?: File) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setMediaError("이미지 파일만 선택할 수 있습니다.");
+      return;
+    }
+    setFaceImageRef(`dev-local://${file.name}`);
+  };
+
+  return <FormCard step="가족 본인 등록" title={`${contactName}님, 본인 정보를 등록해 주세요`} description="초대받은 가족 본인이 직접 동의하고 목소리를 등록합니다.">
+    <div className="profile-select"><span className="person-icon">{contactName.slice(0, 1)}</span><span><b>{contactName}</b><small>{audioRef ? "음성 녹음 완료" : "음성 등록 필요"}</small></span><ChevronRight /></div>
+    <div className="record-card"><div className="mic-ring"><Mic /></div><b>아래 문장을 자연스럽게 읽어 주세요</b><p>“엄마, 오늘 저녁에 다시 전화드릴게요.”</p><div className="wave">{Array.from({length: 28}).map((_, i) => <i key={i} style={{height: `${12 + (i * 13) % 35}px`}}/>)}</div><button className="primary round" onClick={toggleRecording}><Mic /> {recording ? "녹음 종료" : audioRef ? "다시 녹음" : "녹음 시작"}</button>{audioRef && <small className="recorded-status">녹음이 준비됐습니다.</small>}</div>
+    {mediaError && <span className="validation-error">{mediaError}</span>}
+    <label className="optional-card"><Video /><span><b>얼굴정보도 등록할까요?</b><small>{faceImageRef ? "사진 선택 완료" : "선택사항 · 이미지 파일 선택"}</small></span><ChevronRight /><input className="file-input" type="file" accept="image/*" aria-label="얼굴 사진 선택" onChange={(event) => selectFace(event.target.files?.[0])}/></label>
+    <label className="toggle-row"><span><b>본인 등록 및 이용에 동의합니다</b><small>등록한 정보는 가족 사칭 확인에만 사용됩니다.</small></span><input type="checkbox" checked={familyConsent} onChange={e => setFamilyConsent(e.target.checked)}/></label>
+    <button className="primary full" disabled={!audioRef || recording || !familyConsent} onClick={() => onDone(audioRef, durationMs, faceImageRef)}>등록 완료하기</button>
+  </FormCard>;
+}
+
+function Dashboard({ navigate, invitations }: { navigate: (s: Screen) => void; invitations: EnrollmentInvitation[] }) { return <div className="dashboard">
   <section className="status-hero"><div><span className="status-pill"><i/> 통화 보호 켜짐</span><h1>김영희 어머니의 전화를<br/><em>보이스피싱으로부터</em> 보호하고 있습니다.</h1><p>마지막 확인 오늘 오전 9:41 · 모든 기능 정상</p></div><div className="hero-shield"><Shield /><span><Check /></span></div></section>
   <section className="stat-grid"><Stat icon={<PhoneCall/>} value="12" label="이번 달 확인 전화"/><Stat icon={<ShieldAlert/>} value="3" label="의심전화 감지" tone="orange"/><Stat icon={<PhoneOff/>} value="1" label="고위험 차단" tone="red"/><Stat icon={<Users/>} value="2명" label="확인 가족"/></section>
   <div className="section-heading"><div><span>통화 보호 상태</span><h2>모든 준비가 완료됐어요</h2></div><button onClick={() => navigate("protected")}>관리하기 <ChevronRight/></button></div>
   <section className="ready-grid"><Ready icon={<Phone/>} title="가족 연락처" text="등록 완료 · 3개 번호"/><Ready icon={<Mic/>} title="가족 음성" text="등록 완료 · 품질 좋음"/><Ready icon={<UserRoundCheck/>} title="확인 가족" text="김민지 외 1명"/><Ready icon={<Activity/>} title="AI 위험 분석" text="정상 작동 중"/></section>
+  {invitations.length > 0 && <section className="enrollment-summary"><div className="section-heading"><div><span>가족 등록 현황</span><h2>초대한 가족의 진행 상태</h2></div><button onClick={() => navigate("enrollmentStatus")}>자세히 보기 <ChevronRight/></button></div>{invitations.map((item) => <div className="enrollment-person status" key={item.id}><span className="person-icon">{item.family_member_name.slice(0, 1)}</span><span><b>{item.family_member_name}</b><small>{item.status === "COMPLETED" ? "음성·얼굴 등록 완료" : "등록 링크 응답 대기"}</small></span><em className={item.status.toLowerCase()}>{item.status === "COMPLETED" ? "등록 완료" : "응답 대기"}</em></div>)}</section>}
   <div className="section-heading"><div><span>최근 통화</span><h2>통화 보호 기록</h2></div><button onClick={() => navigate("history")}>전체 보기 <ChevronRight/></button></div>
   <section className="recent-list"><CallRow tone="safe" icon={<Check/>} title="등록된 가족 전화" meta="김민지 · 딸 · 오늘 오전 9:41" badge="안전" onClick={() => navigate("normal")}/><CallRow tone="warn" icon={<AlertTriangle/>} title="가족 사칭 의심전화" meta="번호 끝 8821 · 어제 오후 3:18" badge="확인 완료" onClick={() => navigate("analysis")}/><CallRow tone="danger" icon={<PhoneOff/>} title="고위험 전화 차단" meta="번호 끝 4402 · 7월 12일" badge="차단" onClick={() => navigate("blocked")}/></section>
 </div>; }

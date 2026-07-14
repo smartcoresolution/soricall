@@ -1,9 +1,13 @@
+from datetime import datetime, timedelta, timezone
+import hashlib
+import secrets
+
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
 from app.api.deps import DbSession
 from app.core.security import hash_phone_number, phone_last4
-from app.models import Family, FamilyMember, SafeWord, Senior
+from app.models import EnrollmentInvitation, Family, FamilyMember, SafeWord, Senior
 from app.schemas import (
     FamilyCreate,
     FamilyMemberCreate,
@@ -13,6 +17,7 @@ from app.schemas import (
     ProtectedCallUserResponse,
     ConfirmationContactCreate,
     ConfirmationContactResponse,
+    EnrollmentInvitationResponse,
     SafeWordResponse,
     SafeWordUpsert,
     SafeWordVerifyRequest,
@@ -160,6 +165,73 @@ def list_confirmation_contacts(
             .order_by(FamilyMember.notification_priority, FamilyMember.created_at)
         )
     )
+
+
+def _invitation_response(invitation: EnrollmentInvitation, member: FamilyMember, enrollment_url: str | None = None) -> EnrollmentInvitationResponse:
+    now = datetime.now(timezone.utc)
+    expires_at = invitation.expires_at if invitation.expires_at.tzinfo else invitation.expires_at.replace(tzinfo=timezone.utc)
+    invitation_status = "EXPIRED" if invitation.status == "PENDING" and expires_at <= now else invitation.status
+    return EnrollmentInvitationResponse(
+        id=invitation.id,
+        family_id=invitation.family_id,
+        family_member_id=invitation.family_member_id,
+        family_member_name=member.name,
+        relation_code=member.relation_code,
+        phone_number_last4=member.phone_number_last4,
+        channel=invitation.channel,
+        status=invitation_status,
+        sent_at=invitation.sent_at.isoformat(),
+        expires_at=invitation.expires_at.isoformat(),
+        enrollment_url=enrollment_url,
+    )
+
+
+@router.post("/{family_id}/members/{member_id}/enrollment-invitations", response_model=EnrollmentInvitationResponse, status_code=201)
+def create_enrollment_invitation(family_id: str, member_id: str, db: DbSession) -> EnrollmentInvitationResponse:
+    member = db.get(FamilyMember, member_id)
+    if not member or member.family_id != family_id:
+        raise HTTPException(status_code=404, detail="family member not found")
+    token = secrets.token_urlsafe(32)
+    now = datetime.now(timezone.utc)
+    invitation = EnrollmentInvitation(
+        family_id=family_id,
+        family_member_id=member_id,
+        channel="SMS",
+        status="PENDING",
+        token_hash=hashlib.sha256(token.encode()).hexdigest(),
+        sent_at=now,
+        expires_at=now + timedelta(days=3),
+    )
+    db.add(invitation)
+    db.commit()
+    db.refresh(invitation)
+    return _invitation_response(invitation, member, f"/soricall/enroll?token={token}")
+
+
+@router.get("/{family_id}/enrollment-invitations", response_model=list[EnrollmentInvitationResponse])
+def list_enrollment_invitations(family_id: str, db: DbSession) -> list[EnrollmentInvitationResponse]:
+    invitations = list(db.scalars(select(EnrollmentInvitation).where(EnrollmentInvitation.family_id == family_id).order_by(EnrollmentInvitation.created_at)))
+    members = {member.id: member for member in db.scalars(select(FamilyMember).where(FamilyMember.family_id == family_id))}
+    return [_invitation_response(invitation, members[invitation.family_member_id]) for invitation in invitations if invitation.family_member_id in members]
+
+
+@router.post("/{family_id}/enrollment-invitations/{invitation_id}/resend", response_model=EnrollmentInvitationResponse)
+def resend_enrollment_invitation(family_id: str, invitation_id: str, db: DbSession) -> EnrollmentInvitationResponse:
+    invitation = db.get(EnrollmentInvitation, invitation_id)
+    if not invitation or invitation.family_id != family_id:
+        raise HTTPException(status_code=404, detail="invitation not found")
+    member = db.get(FamilyMember, invitation.family_member_id)
+    if not member:
+        raise HTTPException(status_code=404, detail="family member not found")
+    token = secrets.token_urlsafe(32)
+    now = datetime.now(timezone.utc)
+    invitation.token_hash = hashlib.sha256(token.encode()).hexdigest()
+    invitation.status = "PENDING"
+    invitation.sent_at = now
+    invitation.expires_at = now + timedelta(days=3)
+    db.commit()
+    db.refresh(invitation)
+    return _invitation_response(invitation, member, f"/soricall/enroll?token={token}")
 
 
 @router.post("/{family_id}/safe-word", response_model=SafeWordResponse, status_code=201)
