@@ -2,7 +2,7 @@ import { expect, Page, test } from "@playwright/test";
 
 async function openConsent(page: Page, email: string) {
   await page.goto("/");
-  await page.getByRole("button", { name: /통화 보호 시작하기/ }).click();
+  await page.getByRole("button", { name: /회원가입/ }).click();
   await page.getByLabel("이름").fill("동의 테스트");
   await page.getByLabel("이메일").fill(email);
   await page.getByLabel("비밀번호", { exact: true }).fill("password1");
@@ -14,6 +14,10 @@ async function openConsent(page: Page, email: string) {
 test.describe("화면 3: 서비스 이용 동의", () => {
   test("필수 동의를 명시적으로 선택해야 가입할 수 있다", async ({ page }) => {
     await openConsent(page, `pw-consent-${Date.now()}@example.com`);
+    await page.getByRole("button", { name: "항목 1 세부내용 열기" }).click();
+    await expect(page.getByText(/기본 이용 조건입니다/)).toBeVisible();
+    await page.getByRole("button", { name: "항목 1 세부내용 닫기" }).click();
+    await expect(page.getByText(/기본 이용 조건입니다/)).toHaveCount(0);
     const submit = page.getByRole("button", { name: "동의하고 계속하기" });
     await expect(submit).toBeDisabled();
 

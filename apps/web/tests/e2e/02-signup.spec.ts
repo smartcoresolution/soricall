@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 test.describe("화면 2: 회원가입", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
-    await page.getByRole("button", { name: /통화 보호 시작하기/ }).click();
+    await page.getByRole("button", { name: /회원가입/ }).click();
     await expect(page.getByRole("heading", { name: "가족의 안심을 시작해요" })).toBeVisible();
   });
 
@@ -31,5 +31,11 @@ test.describe("화면 2: 회원가입", () => {
     await page.getByRole("button", { name: /이전/ }).click();
     await expect(page.getByLabel("이름")).toHaveValue("홍길동");
     await expect(page.getByLabel("이메일")).toHaveValue("signup-test@example.com");
+  });
+
+  test("상단 홈 버튼으로 최초 화면에 돌아간다", async ({ page }) => {
+    await page.getByRole("button", { name: /^홈$/ }).click();
+    await expect(page.getByRole("heading", { name: "SoriCall" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /회원가입/ })).toBeVisible();
   });
 });

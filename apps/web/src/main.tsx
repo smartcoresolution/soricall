@@ -3,8 +3,8 @@ import ReactDOM from "react-dom/client";
 import {
   Activity, AlertTriangle, ArrowLeft, Bell, Check, CheckCircle2, ChevronRight,
   CircleUserRound, Clock3, FileClock, HeartHandshake, Home, LockKeyhole, Mic,
-  Phone, PhoneCall, PhoneOff, Plus, Settings, Shield, ShieldAlert, Sparkles,
-  UserRoundCheck, Users, Video, Volume2, X,
+  Phone, PhoneCall, PhoneOff, Plus, Settings, Shield, ShieldAlert,
+  UserPlus, UserRoundCheck, Users, Video, Volume2, X,
 } from "lucide-react";
 import { apiGet, apiPost, setApiAccessToken, type Family, type UserPublic } from "./api";
 import "./styles.css";
@@ -37,11 +37,6 @@ type EnrollmentInvitation = {
   expires_at: string;
   enrollment_url: string | null;
 };
-type InstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
-};
-
 const SESSION_STORAGE_KEY = "soricall.dev.session";
 
 function persistSession(session: AuthResponse | null): void {
@@ -93,7 +88,6 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [apiError, setApiError] = useState("");
   const [apiMessage, setApiMessage] = useState("");
-  const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
 
   useEffect(() => {
     if ("serviceWorker" in navigator) {
@@ -101,12 +95,6 @@ function App() {
         scope: import.meta.env.BASE_URL,
       }).catch(() => undefined);
     }
-    const captureInstallPrompt = (event: Event) => {
-      event.preventDefault();
-      setInstallPrompt(event as InstallPromptEvent);
-    };
-    window.addEventListener("beforeinstallprompt", captureInstallPrompt);
-    return () => window.removeEventListener("beforeinstallprompt", captureInstallPrompt);
   }, []);
 
   useEffect(() => {
@@ -185,16 +173,6 @@ function App() {
     const intervalId = window.setInterval(reloadInvitations, 5000);
     return () => window.clearInterval(intervalId);
   }, [screen, familyId, session]);
-
-  const installApp = async () => {
-    if (!installPrompt) {
-      setApiError("브라우저 메뉴에서 ‘앱 설치’ 또는 ‘홈 화면에 추가’를 선택해 주세요.");
-      return;
-    }
-    await installPrompt.prompt();
-    await installPrompt.userChoice;
-    setInstallPrompt(null);
-  };
 
   const runApi = async (action: () => Promise<void>) => {
     if (busy) return;
@@ -330,27 +308,31 @@ function App() {
     setScreen(previous[screen] ?? "welcome");
   };
 
+  const goWelcome = () => {
+    window.history.replaceState({}, "", import.meta.env.BASE_URL);
+    setScreen("welcome");
+  };
+
   return (
     <div className="site-shell">
-      <header className="topbar">
-        <button className="brand" onClick={() => setScreen("home")}>
+      {screen !== "welcome" && <header className="topbar">
+        <button className="brand" onClick={goWelcome}>
           <span className="brand-mark"><Shield size={22} /></span>
           <span>SoriCall<small>안심소리 가족콜</small></span>
         </button>
-        {screen !== "welcome" && <div className="top-title">{title}</div>}
-        {session && <div className="top-actions">
-          <button className="icon-button"><Bell size={20} /><i /></button>
-          <button className="avatar">김</button>
-        </div>}
-      </header>
+        <div className="top-title">{title}</div>
+        <div className="top-actions">
+          <button className="screen-home-button" onClick={goWelcome}><Home size={19} /> 홈</button>
+        </div>
+      </header>}
 
       <main className={`page ${screen === "welcome" ? "welcome-page" : ""}`}>
         {screen !== "welcome" && screen !== "home" && screen !== "signupComplete" && (
           <button className="back-button" onClick={goBack}><ArrowLeft size={18} /> 이전</button>
         )}
-        {screen === "welcome" && <Welcome onSignup={() => setScreen("signup")} onLogin={() => setScreen("login")} onInstall={installApp} />}
+        {screen === "welcome" && <Welcome onSignup={() => setScreen("signup")} onLogin={() => setScreen("login")} />}
         {screen === "signup" && <Signup value={signup} setValue={setSignup} onNext={() => setScreen("consent")} />}
-        {screen === "consent" && <Consent agreed={agreed} setAgreed={setAgreed} onNext={register} />}
+        {screen === "consent" && <Consent agreed={agreed} setAgreed={setAgreed} onNext={register} error={apiError} onClearError={() => setApiError("")} />}
         {screen === "signupComplete" && <SignupComplete onNext={() => setScreen("protected")} />}
         {screen === "login" && <Login value={login} setValue={setLogin} onNext={signIn} />}
         {screen === "protected" && <ProtectedRegistration value={protectedForm} setValue={setProtectedForm} relation={protectedRelation} setRelation={setProtectedRelation} onNext={saveProtectedUser} />}
@@ -367,7 +349,7 @@ function App() {
         {screen === "history" && <HistoryPage />}
         {screen === "admin" && <AdminPage />}
       </main>
-      {(busy || apiError || apiMessage) && <div className={`api-feedback ${apiError ? "error" : ""}`}>{busy ? "안전하게 저장하고 있습니다…" : apiError || apiMessage}<button onClick={() => { setApiError(""); setApiMessage(""); }}><X /></button></div>}
+      {(busy || apiMessage || (apiError && screen !== "consent")) && <div className={`api-feedback ${apiError ? "error" : ""}`}>{busy ? "안전하게 저장하고 있습니다…" : apiError || apiMessage}<button onClick={() => { setApiError(""); setApiMessage(""); }}><X /></button></div>}
 
       {!([ "welcome", "signup", "consent", "signupComplete", "login", "protected", "contacts", "invite", "enrollmentStatus", "biometrics", "enrollmentComplete", "normal", "analysis", "blocked", "confirm"] as Screen[]).includes(screen) && (
         <nav className="bottom-nav">
@@ -381,21 +363,23 @@ function App() {
   );
 }
 
-function Welcome({ onSignup, onLogin, onInstall }: { onSignup: () => void; onLogin: () => void; onInstall: () => void }) {
-  return <div className="hero-grid">
-    <section className="hero-copy">
-      <span className="eyebrow"><Sparkles size={16} /> AI 가족 사칭 전화 보호</span>
-      <h1>부모님의 전화를<br/><em>보이스피싱으로부터</em><br/>지켜드립니다.</h1>
-      <p>가족의 전화번호와 목소리를 기억하고, 의심되는 통화는 가족에게 한 번 더 확인합니다.</p>
-      <div className="hero-actions"><button className="primary large" onClick={onSignup}>통화 보호 시작하기 <ChevronRight /></button><button className="text-button" onClick={onLogin}>이미 가입했어요</button><button className="secondary" onClick={onInstall}>앱으로 설치하기</button></div>
-      <div className="trust-row"><span><CheckCircle2 /> 가족 번호 확인</span><span><CheckCircle2 /> AI 음성 분석</span><span><CheckCircle2 /> 가족 즉시 알림</span></div>
+function Welcome({ onSignup, onLogin }: { onSignup: () => void; onLogin: () => void }) {
+  return <div className="sori-landing">
+    <div className="landing-actions"><button className="signup-chip" onClick={onSignup}><UserPlus /> 회원가입</button></div>
+    <section className="landing-brand">
+      <span className="landing-logo"><Shield /></span>
+      <h1>SoriCall</h1>
+      <p>AI 가족 사칭 전화 보호</p>
     </section>
-    <section className="phone-preview">
-      <div className="preview-status"><span>9:41</span><span>● ● ●</span></div>
-      <div className="shield-orbit"><ShieldAlert /><i /><i /></div>
-      <small>의심전화 분석 중</small><h3>가족 사칭 여부를<br/>확인하고 있어요</h3>
-      <div className="analysis-mini"><span className="done"><Check /> 전화번호 확인</span><span className="active"><Activity /> 음성 위험 분석</span><span><Clock3 /> 가족 확인 대기</span></div>
+    <div className="landing-call-icon"><span><PhoneCall /></span></div>
+    <section className="landing-message">
+      <h2>부모님의 안전한 통화를<br/>가족의 목소리로 지켜드립니다.</h2>
+      <p>가족의 전화번호와 목소리를 기억하고,<br/>의심되는 통화는 가족에게 한 번 더 확인합니다.</p>
     </section>
+    <div className="landing-cta">
+      <button className="primary full" onClick={onLogin}>서비스 시작</button>
+    </div>
+    <p className="landing-notice"><ShieldAlert /> 보이스피싱 위험을 줄이기 위한 가족 통화 보호 서비스입니다.</p>
   </div>;
 }
 
@@ -404,12 +388,20 @@ function Signup({ value, setValue, onNext }: { value: {name:string;email:string;
   <button className="primary full" disabled={!value.name.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.email) || value.password.length < 8 || value.password !== value.passwordConfirm} onClick={onNext}>다음</button><p className="form-note"><LockKeyhole /> 개인정보는 암호화하여 안전하게 보관합니다.</p>
 </FormCard>; }
 
-function Consent({ agreed, setAgreed, onNext }: { agreed: boolean[]; setAgreed: (v: boolean[]) => void; onNext: () => void }) {
-  const items = [["서비스 이용약관", true], ["개인정보 수집·이용", true], ["가족 전화번호 및 음성 특징정보 처리", true], ["통화 위험분석 및 가족 알림", true], ["얼굴정보 처리", false]] as const;
+function Consent({ agreed, setAgreed, onNext, error, onClearError }: { agreed: boolean[]; setAgreed: (v: boolean[]) => void; onNext: () => void; error: string; onClearError: () => void }) {
+  const [expandedItem, setExpandedItem] = useState<number | null>(null);
+  const items = [
+    ["서비스 이용약관", true, "SoriCall의 가족 통화 보호, 위험 안내 및 본인 등록 기능을 제공하기 위한 기본 이용 조건입니다."],
+    ["개인정보 수집·이용", true, "계정 생성과 서비스 제공을 위해 이름, 이메일, 가족관계 및 연락처 정보를 수집·이용합니다."],
+    ["가족 전화번호 및 음성 특징정보 처리", true, "가족 사칭 여부 확인을 위해 등록한 전화번호와 음성에서 추출한 특징정보를 비교·분석합니다. 원본 음성은 개발환경 보존 설정에 따라 저장하지 않을 수 있습니다."],
+    ["통화 위험분석 및 가족 알림", true, "의심 통화의 위험 신호를 분석하고 필요한 경우 등록된 확인 가족에게 알림과 확인 요청을 전달합니다."],
+    ["얼굴정보 처리", false, "가족 본인 확인 정확도를 높이기 위한 선택 항목입니다. 동의하지 않아도 음성 기반 통화 보호 서비스를 이용할 수 있습니다."],
+  ] as const;
   const toggle = (i: number) => setAgreed(agreed.map((v, n) => n === i ? !v : v));
   return <FormCard step="2 / 3" title="서비스 이용에 동의해 주세요" description="얼굴정보는 선택사항이며 동의하지 않아도 서비스를 이용할 수 있습니다.">
+    {error && <div className="inline-api-error" role="alert"><span>{error}</span><button onClick={onClearError} aria-label="오류 닫기"><X /></button></div>}
     <button className={`agree-all ${agreed.every(Boolean) ? "checked" : ""}`} onClick={() => setAgreed(items.map(() => !agreed.every(Boolean)))}><span><Check /></span>전체 동의</button>
-    <div className="consent-list">{items.map(([label, required], i) => <button key={label} onClick={() => toggle(i)}><span className={agreed[i] ? "check checked" : "check"}><Check /></span><b>{required ? "[필수]" : "[선택]"}</b>{label}<ChevronRight /></button>)}</div>
+    <div className="consent-list">{items.map(([label, required, detail], i) => <div className={`consent-item ${expandedItem === i ? "expanded" : ""}`} key={label}><div className="consent-item-row"><button className="consent-toggle" onClick={() => toggle(i)}><span className={agreed[i] ? "check checked" : "check"}><Check /></span><b>{required ? "[필수]" : "[선택]"}</b><span>{label}</span></button><button className="consent-detail-toggle" aria-label={`항목 ${i + 1} 세부내용 ${expandedItem === i ? "닫기" : "열기"}`} onClick={() => setExpandedItem(expandedItem === i ? null : i)}><ChevronRight /></button></div>{expandedItem === i && <div className="consent-detail"><p>{detail}</p></div>}</div>)}</div>
     <button className="primary full" disabled={!agreed.slice(0, 4).every(Boolean)} onClick={onNext}>동의하고 계속하기</button>
   </FormCard>;
 }

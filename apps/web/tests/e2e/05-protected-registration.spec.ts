@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 test("화면 5: 보호 대상 정보를 검증하고 실제 API에 등록한다", async ({ page }) => {
   const email = `pw-protected-${Date.now()}@example.com`;
   await page.goto("/");
-  await page.getByRole("button", { name: /통화 보호 시작하기/ }).click();
+  await page.getByRole("button", { name: /회원가입/ }).click();
   await page.getByLabel("이름").fill("보호자 테스트");
   await page.getByLabel("이메일").fill(email);
   await page.getByLabel("비밀번호", { exact: true }).fill("password1");

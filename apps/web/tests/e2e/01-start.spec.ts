@@ -6,20 +6,14 @@ test.describe("화면 1: 시작", () => {
 
     await expect(page).toHaveTitle("SoriCall");
     await expect(page.getByText("AI 가족 사칭 전화 보호")).toBeVisible();
-    await expect(page.getByRole("heading", { name: /부모님의 전화를/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /부모님의 안전한 통화를/ })).toBeVisible();
     await expect(page.getByText("가족의 전화번호와 목소리를 기억하고")).toBeVisible();
 
-    const signup = page.getByRole("button", { name: /통화 보호 시작하기/ });
-    const login = page.getByRole("button", { name: "이미 가입했어요" });
-    const install = page.getByRole("button", { name: "앱으로 설치하기" });
+    const signup = page.getByRole("button", { name: /회원가입/ });
+    const login = page.getByRole("button", { name: "서비스 시작" });
     await expect(signup).toBeEnabled();
     await expect(login).toBeEnabled();
-    await expect(install).toBeEnabled();
     await expect(page.locator(".top-actions")).toHaveCount(0);
-
-    await install.click();
-    await expect(page.getByText(/앱 설치.*홈 화면에 추가/)).toBeVisible();
-    await page.locator(".api-feedback button").click();
 
     await page.screenshot({ path: "test-results/01-start-mobile.png", fullPage: true });
 

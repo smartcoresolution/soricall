@@ -15,7 +15,7 @@ test("화면 4: 가입 완료 상태를 확인하고 보호 가족 등록으로 
   });
 
   await page.goto("/");
-  await page.getByRole("button", { name: /통화 보호 시작하기/ }).click();
+  await page.getByRole("button", { name: /회원가입/ }).click();
   await page.getByLabel("이름").fill("가입 완료");
   await page.getByLabel("이메일").fill("complete@example.com");
   await page.getByLabel("비밀번호", { exact: true }).fill("password1");
