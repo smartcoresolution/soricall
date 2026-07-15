@@ -19,7 +19,7 @@ from app.api.v1 import (
 )
 from app.core.config import get_settings
 from app.core.database import SessionLocal, init_db
-from app.core.authorization import PROTECTED_PREFIXES, authenticate_request, authorized_for_request
+from app.core.authorization import PROTECTED_PREFIXES, authenticate_request, authorized_for_request, current_user_id
 
 
 settings = get_settings()
@@ -73,7 +73,13 @@ async def development_cors(request: Request, call_next):
 
 @app.middleware("http")
 async def patent_api_authorization(request: Request, call_next):
-    if not request.url.path.startswith(PROTECTED_PREFIXES) or request.url.path.startswith("/api/v1/auth/"):
+    if (
+        request.method == "OPTIONS"
+        or
+        not request.url.path.startswith(PROTECTED_PREFIXES)
+        or request.url.path.startswith("/api/v1/auth/")
+        or request.url.path.startswith("/api/v1/enrollment-invitations/")
+    ):
         return await call_next(request)
     db = SessionLocal()
     try:
@@ -83,7 +89,14 @@ async def patent_api_authorization(request: Request, call_next):
         if not await authorized_for_request(request, db, user):
             return JSONResponse(status_code=403, content={"detail": "family access denied"})
         request.state.current_user_id = user.id
-        return await call_next(request)
+        # Authorization is complete; do not keep a read transaction open while
+        # the endpoint writes through its own database session (notably SQLite in dev/tests).
+        db.close()
+        context_token = current_user_id.set(user.id)
+        try:
+            return await call_next(request)
+        finally:
+            current_user_id.reset(context_token)
     finally:
         db.close()
 
@@ -95,6 +108,7 @@ def health() -> dict[str, str]:
 
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(families.router, prefix="/api/v1")
+app.include_router(families.enrollment_router, prefix="/api/v1")
 app.include_router(seniors.router, prefix="/api/v1")
 app.include_router(calls.router, prefix="/api/v1")
 app.include_router(call_sessions.router, prefix="/api/v1")

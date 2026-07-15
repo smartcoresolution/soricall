@@ -1,14 +1,16 @@
 import json
+from contextvars import ContextVar
 
 from fastapi import Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.security import decode_access_token
-from app.models import CallSession, FamilyConfirmation, FamilyMember, Guardian, Senior, User
+from app.models import CallSession, Family, FamilyConfirmation, FamilyMember, Guardian, Senior, User
 
 
 PROTECTED_PREFIXES = ("/api/v1",)
+current_user_id: ContextVar[str | None] = ContextVar("current_user_id", default=None)
 
 
 def authenticate_request(request: Request, db: Session) -> User | None:
@@ -39,6 +41,30 @@ def can_access_senior(db: Session, user: User, senior_id: str) -> bool:
     ) is not None
 
 
+def can_access_family(db: Session, user: User, family_id: str) -> bool:
+    if user.role == "ADMIN":
+        return True
+    family = db.get(Family, family_id)
+    if not family:
+        return False
+    if family.created_by == user.id:
+        return True
+    if db.scalar(
+        select(FamilyMember.id).where(
+            FamilyMember.family_id == family_id,
+            FamilyMember.user_id == user.id,
+        )
+    ):
+        return True
+    if db.scalar(select(Senior.id).where(Senior.family_id == family_id, Senior.user_id == user.id)):
+        return True
+    return db.scalar(
+        select(Guardian.id)
+        .join(Senior, Guardian.senior_id == Senior.id)
+        .where(Senior.family_id == family_id, Guardian.user_id == user.id)
+    ) is not None
+
+
 async def authorized_for_request(request: Request, db: Session, user: User) -> bool:
     path = request.url.path
     if path.startswith("/api/v1/auth/"):
@@ -47,6 +73,11 @@ async def authorized_for_request(request: Request, db: Session, user: User) -> b
         return user.role == "ADMIN"
     if user.role == "ADMIN":
         return True
+    if path == "/api/v1/families" and request.method == "POST":
+        return user.role in {"GUARDIAN", "SENIOR", "FAMILY_MEMBER"}
+    if path.startswith("/api/v1/families/"):
+        parts = path.split("/")
+        return len(parts) > 4 and can_access_family(db, user, parts[4])
     if path == "/api/v1/call-sessions" and request.method == "POST":
         try:
             senior_id = str(json.loads(await request.body())["senior_id"])

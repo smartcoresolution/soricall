@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("화면 7: 등록 가족에게 실제 초대 링크를 전송한다", async ({ page }) => {
+test("화면 7: 등록 가족의 개발용 초대 링크를 생성한다", async ({ page }) => {
   const email = `pw-invite-${Date.now()}@example.com`;
   await page.goto("/");
   await page.getByRole("button", { name: /통화 보호 시작하기/ }).click();
@@ -22,7 +22,7 @@ test("화면 7: 등록 가족에게 실제 초대 링크를 전송한다", async
 
   await expect(page.getByRole("heading", { name: "가족에게 등록 요청을 보내세요" })).toBeVisible();
   await expect(page.getByText("테스트 손녀")).toBeVisible();
-  await expect(page.getByText("생체정보는 가족 본인이 직접 등록합니다.")).toBeVisible();
+  await expect(page.getByText("현재는 개발환경용 등록 방식입니다.")).toBeVisible();
   await page.screenshot({ path: "test-results/07-invitation-mobile.png", fullPage: true });
 
   const invitationResponse = page.waitForResponse((response) =>
@@ -33,6 +33,7 @@ test("화면 7: 등록 가족에게 실제 초대 링크를 전송한다", async
   expect(response.status()).toBe(201);
   const body = await response.json();
   expect(body.status).toBe("PENDING");
+  expect(body.channel).toBe("DEVELOPMENT_LINK");
   expect(body.enrollment_url).toContain("/soricall/enroll?token=");
   await expect(page.getByRole("heading", { name: "가족 등록 현황" })).toBeVisible();
 });

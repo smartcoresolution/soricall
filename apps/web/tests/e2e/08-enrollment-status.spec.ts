@@ -29,9 +29,13 @@ test("화면 8: 가족 등록 상태를 표시하고 링크를 재전송한다",
   const resendResponse = page.waitForResponse((response) =>
     response.url().endsWith("/resend") && response.request().method() === "POST",
   );
-  await page.getByRole("button", { name: "링크 다시 보내기" }).click();
+  await page.getByRole("button", { name: "링크 재발급" }).click();
   expect((await resendResponse).status()).toBe(200);
   await expect(page.getByText("등록 링크를 다시 보냈습니다.")).toBeVisible();
   await page.getByRole("button", { name: "안심 홈으로 이동" }).click();
   await expect(page.getByText("통화 보호 켜짐")).toBeVisible();
+  await page.reload();
+  await expect(page.getByText("통화 보호 켜짐")).toBeVisible();
+  await expect(page.getByText("테스트 아들")).toBeVisible();
+  await expect(page.getByText("등록 링크 응답 대기")).toBeVisible();
 });

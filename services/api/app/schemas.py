@@ -158,6 +158,14 @@ class EnrollmentInvitationResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class EnrollmentCompleteRequest(BaseModel):
+    audio_ref: str = Field(min_length=1)
+    duration_ms: int = Field(ge=1)
+    mime_type: str = Field(default="audio/webm", min_length=1)
+    face_image_ref: str | None = None
+    consent_accepted: bool
+
+
 class SafeWordUpsert(BaseModel):
     word: str = Field(min_length=1, max_length=100)
     hint: str | None = Field(default=None, max_length=255)

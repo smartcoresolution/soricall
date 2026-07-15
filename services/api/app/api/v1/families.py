@@ -3,11 +3,11 @@ import hashlib
 import secrets
 
 from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.api.deps import DbSession
 from app.core.security import hash_phone_number, phone_last4
-from app.models import EnrollmentInvitation, Family, FamilyMember, SafeWord, Senior
+from app.models import EnrollmentInvitation, FaceProfile, Family, FamilyMember, Guardian, SafeWord, Senior
 from app.schemas import (
     FamilyCreate,
     FamilyMemberCreate,
@@ -18,24 +18,55 @@ from app.schemas import (
     ConfirmationContactCreate,
     ConfirmationContactResponse,
     EnrollmentInvitationResponse,
+    EnrollmentCompleteRequest,
     SafeWordResponse,
     SafeWordUpsert,
     SafeWordVerifyRequest,
     SafeWordVerifyResponse,
 )
 from app.core.security import hash_safe_word
+from app.core.authorization import current_user_id
+from app.services.voice_profile_service import VoiceProfileService
+from app.services.enrollment_delivery_service import get_enrollment_delivery_provider
 
 
 router = APIRouter(prefix="/families", tags=["families"])
+enrollment_router = APIRouter(prefix="/enrollment-invitations", tags=["enrollment-invitations"])
 
 
 @router.post("", response_model=FamilyResponse, status_code=status.HTTP_201_CREATED)
 def create_family(request: FamilyCreate, db: DbSession) -> Family:
-    family = Family(name=request.name, created_by=request.created_by)
+    # HTTP requests always use the authenticated identity. The fallback keeps direct
+    # service-level tests and internal calls backwards compatible.
+    family = Family(name=request.name, created_by=current_user_id.get() or request.created_by)
     db.add(family)
     db.commit()
     db.refresh(family)
     return family
+
+
+@router.get("", response_model=list[FamilyResponse])
+def list_accessible_families(db: DbSession) -> list[Family]:
+    user_id = current_user_id.get()
+    if not user_id:
+        return []
+    member_family_ids = select(FamilyMember.family_id).where(FamilyMember.user_id == user_id)
+    senior_family_ids = select(Senior.family_id).where(Senior.user_id == user_id)
+    guardian_family_ids = (
+        select(Senior.family_id)
+        .join(Guardian, Guardian.senior_id == Senior.id)
+        .where(Guardian.user_id == user_id)
+    )
+    return list(db.scalars(
+        select(Family)
+        .where(or_(
+            Family.created_by == user_id,
+            Family.id.in_(member_family_ids),
+            Family.id.in_(senior_family_ids),
+            Family.id.in_(guardian_family_ids),
+        ))
+        .order_by(Family.created_at)
+    ))
 
 
 @router.get("/{family_id}", response_model=FamilyResponse)
@@ -192,11 +223,12 @@ def create_enrollment_invitation(family_id: str, member_id: str, db: DbSession) 
     if not member or member.family_id != family_id:
         raise HTTPException(status_code=404, detail="family member not found")
     token = secrets.token_urlsafe(32)
+    delivery = get_enrollment_delivery_provider().prepare(token)
     now = datetime.now(timezone.utc)
     invitation = EnrollmentInvitation(
         family_id=family_id,
         family_member_id=member_id,
-        channel="SMS",
+        channel=delivery.channel,
         status="PENDING",
         token_hash=hashlib.sha256(token.encode()).hexdigest(),
         sent_at=now,
@@ -205,7 +237,7 @@ def create_enrollment_invitation(family_id: str, member_id: str, db: DbSession) 
     db.add(invitation)
     db.commit()
     db.refresh(invitation)
-    return _invitation_response(invitation, member, f"/soricall/enroll?token={token}")
+    return _invitation_response(invitation, member, delivery.enrollment_url)
 
 
 @router.get("/{family_id}/enrollment-invitations", response_model=list[EnrollmentInvitationResponse])
@@ -224,14 +256,83 @@ def resend_enrollment_invitation(family_id: str, invitation_id: str, db: DbSessi
     if not member:
         raise HTTPException(status_code=404, detail="family member not found")
     token = secrets.token_urlsafe(32)
+    delivery = get_enrollment_delivery_provider().prepare(token)
     now = datetime.now(timezone.utc)
     invitation.token_hash = hashlib.sha256(token.encode()).hexdigest()
+    invitation.channel = delivery.channel
     invitation.status = "PENDING"
     invitation.sent_at = now
     invitation.expires_at = now + timedelta(days=3)
     db.commit()
     db.refresh(invitation)
-    return _invitation_response(invitation, member, f"/soricall/enroll?token={token}")
+    return _invitation_response(invitation, member, delivery.enrollment_url)
+
+
+def _invitation_for_token(token: str, db: DbSession) -> tuple[EnrollmentInvitation, FamilyMember]:
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    invitation = db.scalar(select(EnrollmentInvitation).where(EnrollmentInvitation.token_hash == token_hash))
+    if not invitation:
+        raise HTTPException(status_code=404, detail="invitation not found")
+    member = db.get(FamilyMember, invitation.family_member_id)
+    if not member:
+        raise HTTPException(status_code=404, detail="family member not found")
+    expires_at = invitation.expires_at if invitation.expires_at.tzinfo else invitation.expires_at.replace(tzinfo=timezone.utc)
+    if invitation.status == "PENDING" and expires_at <= datetime.now(timezone.utc):
+        invitation.status = "EXPIRED"
+        db.commit()
+    return invitation, member
+
+
+@enrollment_router.get("/resolve", response_model=EnrollmentInvitationResponse)
+def resolve_enrollment_invitation(token: str, db: DbSession) -> EnrollmentInvitationResponse:
+    invitation, member = _invitation_for_token(token, db)
+    return _invitation_response(invitation, member)
+
+
+@enrollment_router.post("/complete", response_model=EnrollmentInvitationResponse)
+def complete_enrollment_invitation(
+    token: str,
+    request: EnrollmentCompleteRequest,
+    db: DbSession,
+) -> EnrollmentInvitationResponse:
+    invitation, member = _invitation_for_token(token, db)
+    if invitation.status == "EXPIRED":
+        raise HTTPException(status_code=410, detail="invitation expired")
+    if invitation.status == "COMPLETED":
+        return _invitation_response(invitation, member)
+    if not request.consent_accepted:
+        raise HTTPException(status_code=400, detail="consent required")
+
+    voice_service = VoiceProfileService(db)
+    profile = voice_service.create_profile(
+        family_member_id=member.id,
+        display_name=member.name,
+        consent_id=invitation.id,
+    )
+    voice_service.add_sample(
+        voice_profile_id=profile.id,
+        audio_ref=request.audio_ref,
+        object_key=None,
+        duration_ms=request.duration_ms,
+        sample_rate=None,
+        mime_type=request.mime_type,
+        purpose="ENROLLMENT",
+    )
+    voice_service.enroll(voice_profile_id=profile.id, audio_ref=request.audio_ref)
+    if request.face_image_ref:
+        db.add(FaceProfile(
+            family_member_id=member.id,
+            display_name=member.name,
+            image_ref=request.face_image_ref,
+            consent_accepted=True,
+            status="ACTIVE",
+        ))
+    invitation.status = "COMPLETED"
+    invitation.completed_at = datetime.now(timezone.utc)
+    member.is_verified = True
+    db.commit()
+    db.refresh(invitation)
+    return _invitation_response(invitation, member)
 
 
 @router.post("/{family_id}/safe-word", response_model=SafeWordResponse, status_code=201)
