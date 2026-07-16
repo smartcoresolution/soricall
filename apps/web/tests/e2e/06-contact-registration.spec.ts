@@ -5,20 +5,25 @@ test("화면 6: 확인 가족을 여러 명 실제 API에 등록한다", async (
   await page.goto("/");
   await page.getByRole("button", { name: /회원가입/ }).click();
   await page.getByLabel("이름").fill("확인 가족 테스트");
+  await page.getByLabel("본인 휴대전화 번호").fill("010-1000-2000");
   await page.getByLabel("이메일").fill(email);
   await page.getByLabel("비밀번호", { exact: true }).fill("password1");
   await page.getByLabel("비밀번호 확인").fill("password1");
   await page.getByRole("button", { name: "다음" }).click();
   await page.getByRole("button", { name: "전체 동의" }).click();
   await page.getByRole("button", { name: "동의하고 계속하기" }).click();
-  await page.getByRole("button", { name: /보호 가족 등록하기/ }).click();
+  await page.getByRole("button", { name: "서비스 시작" }).click();
+  await page.getByLabel("비밀번호").fill("password1");
+  await page.getByRole("button", { name: "로그인" }).click();
+  await page.getByRole("button", { name: /부모님의 전화를 보호하고 싶어요/ }).click();
   await page.getByLabel("성함").fill("테스트 어머니");
   await page.getByLabel("휴대전화 번호").fill("010-1111-2222");
+  await page.getByRole("button", { name: "다음: 부모님 앱 연결" }).click();
   await page.getByRole("button", { name: "다음: 확인 가족 등록" }).click();
 
   await expect(page.getByRole("heading", { name: "의심전화를 확인해 줄 가족을 등록해 주세요" })).toBeVisible();
   const add = page.getByRole("button", { name: /확인 가족 한 명 더 추가/ });
-  const next = page.getByRole("button", { name: "다음: 가족 정보 등록" });
+  const next = page.getByRole("button", { name: "다음: 음성·얼굴 등록 요청" });
   await expect(add).toBeDisabled();
   await expect(next).toBeDisabled();
 
@@ -57,5 +62,9 @@ test("화면 6: 확인 가족을 여러 명 실제 API에 등록한다", async (
     relation_code: "DAUGHTER",
     phone_number: "010-5555-6666",
   });
+  await expect(page.getByRole("heading", { name: "가족별 등록 항목을 확인해 주세요" })).toBeVisible();
+  await expect(page.getByText("음성 등록", { exact: true })).toBeVisible();
+  await expect(page.getByText("얼굴 등록", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "다음: 등록 요청 보내기" }).click();
   await expect(page.getByRole("heading", { name: "가족에게 등록 요청을 보내세요" })).toBeVisible();
 });

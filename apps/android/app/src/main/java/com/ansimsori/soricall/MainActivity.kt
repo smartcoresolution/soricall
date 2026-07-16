@@ -81,7 +81,7 @@ class MainActivity : ComponentActivity() {
 }
 
 private enum class AppScreen {
-    START, SIGNUP, CONSENT, LOGIN, HOME, PROTECTED, CONTACT, BIOMETRICS,
+    PARENT_READY, START, SIGNUP, CONSENT, LOGIN, HOME, PROTECTED, CONTACT, BIOMETRICS,
     NORMAL, ANALYSIS, BLOCKED, CONFIRM, HISTORY, SETTINGS,
 }
 
@@ -94,7 +94,7 @@ private fun SoriCallAndroidApp(incomingRisk: String?) {
             when (incomingRisk) {
                 "CRITICAL" -> AppScreen.BLOCKED
                 "HIGH", "CAUTION" -> AppScreen.ANALYSIS
-                else -> AppScreen.START
+                else -> AppScreen.PARENT_READY
             },
         )
     }
@@ -123,6 +123,7 @@ private fun SoriCallAndroidApp(incomingRisk: String?) {
                 color = Color.Transparent,
             ) {
                 when (screen) {
+                    AppScreen.PARENT_READY -> ParentReadyScreen()
                     AppScreen.START -> StartScreen({ screen = AppScreen.SIGNUP }, { screen = AppScreen.LOGIN })
                     AppScreen.SIGNUP -> SignupScreen(signupName, { signupName = it }, signupEmail, { signupEmail = it }, signupPassword, { signupPassword = it }) { screen = AppScreen.CONSENT }
                     AppScreen.CONSENT -> ConsentScreen { apiAction { val auth = application.api.register(signupEmail, signupPassword, signupName); application.saveAuth(auth.accessToken, auth.refreshToken, auth.userId); screen = AppScreen.PROTECTED } }
@@ -142,6 +143,24 @@ private fun SoriCallAndroidApp(incomingRisk: String?) {
                 error?.let { Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.BottomCenter) { Text(it, color = Color.White, modifier = Modifier.background(Red, RoundedCornerShape(12.dp)).padding(14.dp)) } }
             }
         }
+    }
+}
+
+@Composable
+private fun ParentReadyScreen() {
+    val activity = LocalContext.current as? ComponentActivity
+    Page {
+        Spacer(Modifier.height(34.dp))
+        StatusIcon("✓", TealSoft, Teal, 92)
+        Spacer(Modifier.height(26.dp))
+        Text("SoriCall 설치 완료", fontSize = 29.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
+        Spacer(Modifier.height(12.dp))
+        Body("부모님 전화 보호를 연결하려면\n방금 전 설치 안내 화면으로 돌아가 주세요.", centered = true)
+        Spacer(Modifier.height(24.dp))
+        InfoCard("다음 단계", "설치 안내 화면에서 ‘설치를 완료했어요’를 누른 뒤 휴대전화 본인 확인과 권한 설정을 진행합니다.")
+        Spacer(Modifier.weight(1f))
+        PrimaryButton("설치 안내 화면으로 돌아가기", { activity?.finish() })
+        Caption("화면이 닫히면 브라우저의 SoriCall 설치 안내가 다시 표시됩니다.")
     }
 }
 

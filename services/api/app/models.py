@@ -51,12 +51,40 @@ class User(Base):
 
     id: Mapped[str] = mapped_column(GUID(), primary_key=True, default=new_uuid)
     email: Mapped[str | None] = mapped_column(String(255), unique=True, index=True)
-    phone_number: Mapped[str | None] = mapped_column(String(50))
+    phone_number: Mapped[str | None] = mapped_column(String(50), index=True)
     display_name: Mapped[str] = mapped_column(String(100))
     role: Mapped[str] = mapped_column(String(30))
     password_hash: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PhoneVerification(Base):
+    __tablename__ = "phone_verifications"
+
+    id: Mapped[str] = mapped_column(GUID(), primary_key=True, default=new_uuid)
+    phone_number: Mapped[str] = mapped_column(String(50), index=True)
+    code_hash: Mapped[str] = mapped_column(Text)
+    purpose: Mapped[str] = mapped_column(String(30), default="SIGNUP")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DeviceEnrollment(Base):
+    __tablename__ = "device_enrollments"
+
+    id: Mapped[str] = mapped_column(GUID(), primary_key=True, default=new_uuid)
+    senior_id: Mapped[str] = mapped_column(GUID(), ForeignKey("seniors.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(Text, unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(30), default="INVITED")
+    phone_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    permissions_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class RefreshToken(Base):

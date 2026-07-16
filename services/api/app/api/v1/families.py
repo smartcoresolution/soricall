@@ -141,6 +141,18 @@ def list_protected_call_users(family_id: str, db: DbSession) -> list[Senior]:
     return list(db.scalars(select(Senior).where(Senior.family_id == family_id)))
 
 
+@router.delete(
+    "/{family_id}/protected-call-users/{protected_user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_protected_call_user(family_id: str, protected_user_id: str, db: DbSession) -> None:
+    protected_user = db.get(Senior, protected_user_id)
+    if not protected_user or protected_user.family_id != family_id:
+        raise HTTPException(status_code=404, detail="protected call user not found")
+    db.delete(protected_user)
+    db.commit()
+
+
 @router.post(
     "/{family_id}/protected-call-users/{protected_user_id}/confirmation-contacts",
     response_model=ConfirmationContactResponse,

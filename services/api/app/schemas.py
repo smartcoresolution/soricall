@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 
 
 class UserPublic(BaseModel):
@@ -6,21 +6,59 @@ class UserPublic(BaseModel):
     email: str | None
     display_name: str
     role: str
+    phone_number: str | None = None
 
     model_config = {"from_attributes": True}
 
 
 class RegisterRequest(BaseModel):
-    email: EmailStr
+    phone_number: str = Field(pattern=r"^01[016789]-?\d{3,4}-?\d{4}$")
+    verification_token: str = Field(min_length=1)
     password: str = Field(min_length=8)
     display_name: str = Field(min_length=1, max_length=100)
     role: str = Field(pattern="^(SENIOR|GUARDIAN|FAMILY_MEMBER|ADMIN)$")
-    phone_number: str | None = None
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    phone_number: str = Field(pattern=r"^01[016789]-?\d{3,4}-?\d{4}$")
     password: str
+
+
+class PhoneVerificationSendRequest(BaseModel):
+    phone_number: str = Field(pattern=r"^01[016789]-?\d{3,4}-?\d{4}$")
+
+
+class PhoneVerificationSendResponse(BaseModel):
+    verification_id: str
+    expires_in: int
+    development_code: str | None = None
+
+
+class PhoneVerificationConfirmRequest(BaseModel):
+    verification_id: str
+    code: str = Field(pattern=r"^\d{6}$")
+
+
+class PhoneVerificationConfirmResponse(BaseModel):
+    verification_token: str
+
+
+class DeviceEnrollmentResponse(BaseModel):
+    id: str
+    protected_user_id: str
+    protected_user_name: str
+    phone_number_last4: str | None
+    status: str
+    enrollment_url: str | None = None
+
+
+class DeviceVerificationRequest(BaseModel):
+    phone_number: str = Field(pattern=r"^01[016789]-?\d{3,4}-?\d{4}$")
+
+
+class DeviceVerificationConfirmRequest(BaseModel):
+    verification_id: str
+    code: str = Field(pattern=r"^\d{6}$")
 
 
 class AuthResponse(BaseModel):
@@ -101,7 +139,7 @@ class GuardianResponse(BaseModel):
 
 class ProtectedCallUserCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
-    relation_code: str = Field(pattern="^(FATHER|MOTHER|GRANDFATHER|GRANDMOTHER|OTHER)$")
+    relation_code: str = Field(pattern="^(SELF|FATHER|MOTHER|PATERNAL_GRANDFATHER|PATERNAL_GRANDMOTHER|MATERNAL_GRANDFATHER|MATERNAL_GRANDMOTHER|SPOUSE_FATHER|SPOUSE_MOTHER|OTHER)$")
     phone_number: str = Field(min_length=4)
     user_id: str | None = None
 

@@ -1,30 +1,85 @@
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 from datetime import datetime, timedelta, timezone
+import secrets
 
 from app.api.deps import DbSession
-from app.core.security import create_access_token, create_refresh_token, hash_password, hash_refresh_token, verify_password
+from app.core.security import create_access_token, create_refresh_token, hash_password, hash_refresh_token, hash_verification_code, normalize_phone_number, verify_password
 from app.core.config import get_settings
-from app.models import RefreshToken, User
-from app.schemas import AuthResponse, LoginRequest, RefreshTokenRequest, RegisterRequest, UserPublic
+from app.models import PhoneVerification, RefreshToken, User
+from app.schemas import AuthResponse, LoginRequest, PhoneVerificationConfirmRequest, PhoneVerificationConfirmResponse, PhoneVerificationSendRequest, PhoneVerificationSendResponse, RefreshTokenRequest, RegisterRequest, UserPublic
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+@router.post("/phone-verifications", response_model=PhoneVerificationSendResponse, status_code=status.HTTP_201_CREATED)
+def send_phone_verification(request: PhoneVerificationSendRequest, db: DbSession) -> PhoneVerificationSendResponse:
+    phone_number = normalize_phone_number(request.phone_number)
+    if db.scalar(select(User).where(User.phone_number == phone_number)):
+        raise HTTPException(status_code=409, detail="phone number already registered")
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    verification = PhoneVerification(
+        phone_number=phone_number,
+        code_hash="pending",
+        purpose="SIGNUP",
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+    )
+    db.add(verification)
+    db.flush()
+    verification.code_hash = hash_verification_code(verification.id, code)
+    db.commit()
+    return PhoneVerificationSendResponse(
+        verification_id=verification.id,
+        expires_in=300,
+        development_code=code if get_settings().app_env != "production" else None,
+    )
+
+
+@router.post("/phone-verifications/confirm", response_model=PhoneVerificationConfirmResponse)
+def confirm_phone_verification(request: PhoneVerificationConfirmRequest, db: DbSession) -> PhoneVerificationConfirmResponse:
+    verification = db.get(PhoneVerification, request.verification_id)
+    now = datetime.now(timezone.utc)
+    if not verification or verification.purpose != "SIGNUP":
+        raise HTTPException(status_code=404, detail="phone verification not found")
+    if verification.consumed_at or _as_utc(verification.expires_at) <= now:
+        raise HTTPException(status_code=400, detail="phone verification expired")
+    if verification.attempts >= 5:
+        raise HTTPException(status_code=429, detail="phone verification attempts exceeded")
+    verification.attempts += 1
+    if not secrets.compare_digest(verification.code_hash, hash_verification_code(verification.id, request.code)):
+        db.commit()
+        raise HTTPException(status_code=400, detail="invalid phone verification code")
+    verification.verified_at = now
+    token = create_refresh_token()
+    verification.code_hash = hash_verification_code(verification.id, token)
+    db.commit()
+    return PhoneVerificationConfirmResponse(verification_token=token)
+
+
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 def register(request: RegisterRequest, db: DbSession) -> AuthResponse:
-    existing = db.scalar(select(User).where(User.email == request.email))
+    phone_number = normalize_phone_number(request.phone_number)
+    existing = db.scalar(select(User).where(User.phone_number == phone_number))
     if existing:
-        raise HTTPException(status_code=409, detail="email already registered")
+        raise HTTPException(status_code=409, detail="phone number already registered")
+
+    verification = db.scalar(select(PhoneVerification).where(
+        PhoneVerification.phone_number == phone_number,
+        PhoneVerification.verified_at.is_not(None),
+        PhoneVerification.consumed_at.is_(None),
+    ).order_by(PhoneVerification.created_at.desc()))
+    if not verification or _as_utc(verification.expires_at) <= datetime.now(timezone.utc) or not secrets.compare_digest(verification.code_hash, hash_verification_code(verification.id, request.verification_token)):
+        raise HTTPException(status_code=400, detail="phone verification required")
 
     user = User(
-        email=request.email,
-        phone_number=request.phone_number,
+        email=None,
+        phone_number=phone_number,
         display_name=request.display_name,
         role=request.role,
         password_hash=hash_password(request.password),
     )
+    verification.consumed_at = datetime.now(timezone.utc)
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -34,9 +89,9 @@ def register(request: RegisterRequest, db: DbSession) -> AuthResponse:
 
 @router.post("/login", response_model=AuthResponse)
 def login(request: LoginRequest, db: DbSession) -> AuthResponse:
-    user = db.scalar(select(User).where(User.email == request.email))
+    user = db.scalar(select(User).where(User.phone_number == normalize_phone_number(request.phone_number)))
     if not user or not user.password_hash or not verify_password(request.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="invalid email or password")
+        raise HTTPException(status_code=401, detail="invalid phone number or password")
 
     return _auth_response(user, db)
 

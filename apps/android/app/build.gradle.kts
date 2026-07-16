@@ -11,9 +11,25 @@ android {
         applicationId = "com.ansimsori.soricall"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
-        buildConfigField("String", "SORICALL_API_BASE_URL", "\"http://10.0.2.2:8000\"")
+        versionCode = 3
+        versionName = "0.3.0"
+        buildConfigField("String", "SORICALL_API_BASE_URL", "\"https://www.ansimsori.ai/soricall-api\"")
+    }
+
+    signingConfigs {
+        create("release") {
+            storeFile = file(System.getenv("SORICALL_KEYSTORE_PATH") ?: "/home/soricall/.android/soricall-release.jks")
+            storePassword = System.getenv("SORICALL_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("SORICALL_KEY_ALIAS") ?: "soricall"
+            keyPassword = System.getenv("SORICALL_KEY_PASSWORD")
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            signingConfig = signingConfigs.getByName("release")
+            isMinifyEnabled = false
+        }
     }
 
     buildFeatures {

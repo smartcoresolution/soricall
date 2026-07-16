@@ -66,6 +66,7 @@ export type UserPublic = {
   email: string | null;
   display_name: string;
   role: string;
+  phone_number?: string | null;
 };
 
 export type Family = {
@@ -131,6 +132,11 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   return parseResponse<T>(response);
 }
 
+export async function apiDelete(path: string): Promise<void> {
+  const response = await requestWithFallback(path, { method: "DELETE" });
+  await parseResponse<void>(response);
+}
+
 export function getResolvedApiBaseUrl(): string {
   return resolvedApiBaseUrl ?? apiBaseCandidates()[0] ?? "";
 }
@@ -167,7 +173,13 @@ async function parseResponse<T>(response: Response): Promise<T> {
   const text = await response.text();
   const data = text ? JSON.parse(text) : null;
   if (!response.ok) {
-    throw new Error(data?.detail ?? `Request failed with ${response.status}`);
+    const detail = data?.detail;
+    const message = Array.isArray(detail)
+      ? detail.map((item) => item?.msg ?? String(item)).join(", ")
+      : typeof detail === "object" && detail !== null
+        ? detail.msg ?? JSON.stringify(detail)
+        : detail;
+    throw new Error(message ?? `Request failed with ${response.status}`);
   }
   return data as T;
 }

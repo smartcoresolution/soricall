@@ -65,6 +65,10 @@ def hash_refresh_token(token: str) -> str:
     return hash_value(token, salt="refresh-token")
 
 
+def hash_verification_code(verification_id: str, code: str) -> str:
+    return hash_value(code, salt=f"phone-verification:{verification_id}")
+
+
 def decode_access_token(token: str) -> dict[str, Any] | None:
     settings = get_settings()
     try:

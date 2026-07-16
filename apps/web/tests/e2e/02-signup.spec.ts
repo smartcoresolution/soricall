@@ -12,12 +12,15 @@ test.describe("화면 2: 회원가입", () => {
     await expect(next).toBeDisabled();
 
     await page.getByLabel("이름").fill("홍길동");
-    await page.getByLabel("이메일").fill("잘못된이메일");
+    await page.getByLabel("본인 휴대전화 번호").fill("010-1000-2000");
     await page.getByLabel("비밀번호", { exact: true }).fill("password1");
     await page.getByLabel("비밀번호 확인").fill("password1");
     await expect(next).toBeDisabled();
 
-    await page.getByLabel("이메일").fill("signup-test@example.com");
+    await page.getByRole("button", { name: "인증번호 받기" }).click();
+    await expect(page.getByLabel("문자 인증번호")).toHaveValue(/^\d{6}$/);
+    await page.getByRole("button", { name: "인증 확인" }).click();
+    await expect(page.getByText("휴대전화 인증이 완료됐습니다.", { exact: true })).toBeVisible();
     await page.getByLabel("비밀번호 확인").fill("different1");
     await expect(next).toBeDisabled();
 
@@ -30,7 +33,7 @@ test.describe("화면 2: 회원가입", () => {
 
     await page.getByRole("button", { name: /이전/ }).click();
     await expect(page.getByLabel("이름")).toHaveValue("홍길동");
-    await expect(page.getByLabel("이메일")).toHaveValue("signup-test@example.com");
+    await expect(page.getByLabel("본인 휴대전화 번호")).toHaveValue("010-1000-2000");
   });
 
   test("상단 홈 버튼으로 최초 화면에 돌아간다", async ({ page }) => {

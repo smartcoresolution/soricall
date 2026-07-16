@@ -10,6 +10,7 @@ from app.api.v1 import (
     auth,
     call_sessions,
     calls,
+    device_enrollments,
     emergency,
     face_video,
     families,
@@ -78,6 +79,7 @@ async def patent_api_authorization(request: Request, call_next):
         or
         not request.url.path.startswith(PROTECTED_PREFIXES)
         or request.url.path.startswith("/api/v1/auth/")
+        or request.url.path.startswith("/api/v1/device-enrollments/")
         or request.url.path.startswith("/api/v1/enrollment-invitations/")
     ):
         return await call_next(request)
@@ -107,6 +109,8 @@ def health() -> dict[str, str]:
 
 
 app.include_router(auth.router, prefix="/api/v1")
+app.include_router(device_enrollments.family_router, prefix="/api/v1")
+app.include_router(device_enrollments.public_router, prefix="/api/v1")
 app.include_router(families.router, prefix="/api/v1")
 app.include_router(families.enrollment_router, prefix="/api/v1")
 app.include_router(seniors.router, prefix="/api/v1")
