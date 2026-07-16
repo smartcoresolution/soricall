@@ -1,5 +1,51 @@
 # SoriCall Worklog
 
+# 2026-07-16 — 부모님 Android 앱 연결·배포 흐름 개선
+
+## Android 앱 연결 흐름
+
+- 일반 홈페이지 설치 시 레거시 `설치 완료` 화면 대신 SoriCall 서비스 시작 화면을 표시하도록 초기 진입 상태를 변경했다.
+- 부모님 초대 링크의 `device_token`을 Android 딥링크로 전달하고 암호화 저장하도록 구현했다.
+- 앱 내부에서 초대 조회, 부모님 휴대전화 인증, Android 전화·마이크·알림 권한, 통화 선별 앱 역할 설정, 통화 보호 활성화를 진행하도록 연결했다.
+- 이미 연결된 휴대전화는 홈으로, 위험 알림으로 실행된 경우에는 위험 분석·차단 화면으로 분기한다.
+
+## 휴대전화 가입·로그인
+
+- Android의 기존 이메일 가입·로그인을 웹과 동일한 휴대전화 번호 기반 방식으로 교체했다.
+- 회원가입에 인증번호 발송·확인, 이름·비밀번호 입력, 약관 동의 흐름을 연결했다.
+- 로그인 요청을 휴대전화 번호와 비밀번호 방식으로 변경했다.
+
+## API 및 DB 수정
+
+- Android 네트워크 계층에 기기 연결 초대 조회, 인증번호 발송·확인, 보호 활성화 API를 추가했다.
+- `DEVICE_CONNECT:<UUID>`가 DB의 30자 제한을 초과해 발생하던 인증번호 API 500 오류를 확인했다.
+- `phone_verifications.purpose`를 80자로 확장하는 모델 변경과 `20260716_03` Alembic 마이그레이션을 추가했다.
+- 실행 중인 개발 PostgreSQL에도 컬럼 변경을 적용했으며 인증번호 요청의 `201 Created`를 확인했다.
+
+## Android 운영 서명 및 배포
+
+- 기존 서명 비밀번호를 복구할 수 없어 새로운 운영 키스토어 v2를 생성했다.
+- 키스토어와 비밀번호는 Git 외부 `/home/soricall/.android`에 권한 `600`으로 저장했다.
+- 앱 버전을 `0.3.3`, versionCode `6`으로 올렸다.
+- Gradle DEX 메모리 부족을 해결하기 위해 JVM heap을 4GB로 설정했다.
+- 새 키로 Release APK를 빌드하고 APK Signature Scheme v2 서명을 검증했다.
+- 기존 운영 APK를 백업하고 `/var/www/soricall/downloads/soricall.apk`를 새 Release APK로 교체했다.
+- 공개 다운로드 파일과 빌드 산출물의 SHA-256 일치 및 공개 APK 버전 `0.3.3`을 확인했다.
+
+## 검증
+
+- Web production build 성공
+- Android Debug APK build 성공
+- Android Release APK build 성공
+- Release APK 서명 검증 성공
+- 공개 APK 다운로드·해시·버전 검증 성공
+
+## 운영 주의사항
+
+- v2 키 도입 이전 서명으로 설치된 앱은 한 번 삭제한 뒤 새 APK를 설치해야 한다.
+- 이후 업데이트는 반드시 `/home/soricall/.android/soricall-release-v2.jks`와 대응 비밀번호를 사용해야 한다.
+- 키스토어와 비밀번호 파일은 별도 보안 저장소에 반드시 백업한다.
+
 작성 시각: 2026-06-26 12:18 KST
 
 ## 개요

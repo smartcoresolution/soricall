@@ -21,6 +21,12 @@ class SoriCallApplication : Application() {
     fun configuredSeniorId(): String? =
         preferences.getString("senior_id", null)
 
+    fun pendingDeviceToken(): String? = preferences.getString("device_enrollment_token", null)
+
+    fun savePendingDeviceToken(token: String) {
+        preferences.edit().putString("device_enrollment_token", token).apply()
+    }
+
     fun accessToken(): String? = preferences.getString("access_token", null)
     fun currentUserId(): String? = preferences.getString("user_id", null)
 
@@ -30,6 +36,10 @@ class SoriCallApplication : Application() {
 
     fun saveConnection(seniorId: String, accessToken: String) {
         preferences.edit().putString("senior_id", seniorId).putString("access_token", accessToken).apply()
+    }
+
+    fun completeDeviceConnection(seniorId: String) {
+        preferences.edit().putString("senior_id", seniorId).remove("device_enrollment_token").apply()
     }
 
     fun clearConnection() {

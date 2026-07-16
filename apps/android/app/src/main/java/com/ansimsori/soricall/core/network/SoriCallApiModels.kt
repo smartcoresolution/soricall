@@ -15,6 +15,19 @@ data class ConfirmationContactCreateDto(
     val primary: Boolean,
 )
 
+data class DeviceEnrollmentDto(
+    val id: String,
+    val protectedUserId: String,
+    val protectedUserName: String,
+    val phoneNumberLast4: String?,
+    val status: String,
+)
+
+data class PhoneVerificationDto(
+    val verificationId: String,
+    val developmentCode: String?,
+)
+
 data class RegisterRequestDto(
     val email: String,
     val password: String,

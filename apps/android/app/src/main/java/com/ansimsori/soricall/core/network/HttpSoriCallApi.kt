@@ -2,6 +2,7 @@ package com.ansimsori.soricall.core.network
 
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -10,12 +11,27 @@ class HttpSoriCallApi(
     private val baseUrl: String,
     private val tokenProvider: () -> String? = { null },
 ) : SoriCallApiContract by MockSoriCallApi() {
-    override suspend fun register(email: String, password: String, displayName: String): AuthSessionDto = withContext(Dispatchers.IO) {
-        parseAuth(request("/api/v1/auth/register", JSONObject().put("email", email).put("password", password).put("display_name", displayName).put("role", "GUARDIAN")))
+    override suspend fun sendSignupVerification(phoneNumber: String): PhoneVerificationDto = withContext(Dispatchers.IO) {
+        val json = request("/api/v1/auth/phone-verifications", JSONObject().put("phone_number", phoneNumber))
+        PhoneVerificationDto(
+            verificationId = json.getString("verification_id"),
+            developmentCode = json.optString("development_code").takeIf { it.isNotBlank() && it != "null" },
+        )
     }
 
-    override suspend fun login(email: String, password: String): AuthSessionDto = withContext(Dispatchers.IO) {
-        parseAuth(request("/api/v1/auth/login", JSONObject().put("email", email).put("password", password)))
+    override suspend fun confirmSignupVerification(verificationId: String, code: String): String = withContext(Dispatchers.IO) {
+        request(
+            "/api/v1/auth/phone-verifications/confirm",
+            JSONObject().put("verification_id", verificationId).put("code", code),
+        ).getString("verification_token")
+    }
+
+    override suspend fun register(phoneNumber: String, verificationToken: String, password: String, displayName: String): AuthSessionDto = withContext(Dispatchers.IO) {
+        parseAuth(request("/api/v1/auth/register", JSONObject().put("phone_number", phoneNumber).put("verification_token", verificationToken).put("password", password).put("display_name", displayName).put("role", "GUARDIAN")))
+    }
+
+    override suspend fun login(phoneNumber: String, password: String): AuthSessionDto = withContext(Dispatchers.IO) {
+        parseAuth(request("/api/v1/auth/login", JSONObject().put("phone_number", phoneNumber).put("password", password)))
     }
 
     override suspend fun createFamily(name: String, createdBy: String): String = withContext(Dispatchers.IO) {
@@ -29,6 +45,44 @@ class HttpSoriCallApi(
     override suspend fun createConfirmationContact(familyId: String, protectedUserId: String, request: ConfirmationContactCreateDto): String = withContext(Dispatchers.IO) {
         this@HttpSoriCallApi.request("/api/v1/families/$familyId/protected-call-users/$protectedUserId/confirmation-contacts", JSONObject().put("name", request.name).put("phone_number", request.phoneNumber).put("relation_code", request.relationCode).put("is_primary_contact", request.primary).put("notification_priority", 1).put("notify_enabled", true)).getString("id")
     }
+
+    override suspend fun resolveDeviceEnrollment(token: String): DeviceEnrollmentDto = withContext(Dispatchers.IO) {
+        parseDeviceEnrollment(get("/api/v1/device-enrollments/resolve?token=${encoded(token)}"))
+    }
+
+    override suspend fun sendDeviceVerification(token: String, phoneNumber: String): PhoneVerificationDto = withContext(Dispatchers.IO) {
+        val json = request(
+            "/api/v1/device-enrollments/verification?token=${encoded(token)}",
+            JSONObject().put("phone_number", phoneNumber),
+        )
+        PhoneVerificationDto(
+            verificationId = json.getString("verification_id"),
+            developmentCode = json.optString("development_code").takeIf { it.isNotBlank() && it != "null" },
+        )
+    }
+
+    override suspend fun confirmDeviceVerification(token: String, verificationId: String, code: String): DeviceEnrollmentDto = withContext(Dispatchers.IO) {
+        parseDeviceEnrollment(
+            request(
+                "/api/v1/device-enrollments/verification/confirm?token=${encoded(token)}",
+                JSONObject().put("verification_id", verificationId).put("code", code),
+            ),
+        )
+    }
+
+    override suspend fun completeDeviceEnrollment(token: String): DeviceEnrollmentDto = withContext(Dispatchers.IO) {
+        parseDeviceEnrollment(request("/api/v1/device-enrollments/complete?token=${encoded(token)}", JSONObject()))
+    }
+
+    private fun parseDeviceEnrollment(json: JSONObject) = DeviceEnrollmentDto(
+        id = json.getString("id"),
+        protectedUserId = json.getString("protected_user_id"),
+        protectedUserName = json.getString("protected_user_name"),
+        phoneNumberLast4 = json.optString("phone_number_last4").takeIf { it.isNotBlank() && it != "null" },
+        status = json.getString("status"),
+    )
+
+    private fun encoded(value: String): String = URLEncoder.encode(value, Charsets.UTF_8.name())
 
     private fun parseAuth(json: JSONObject): AuthSessionDto {
         val user = json.getJSONObject("user")

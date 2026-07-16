@@ -65,7 +65,7 @@ class PhoneVerification(Base):
     id: Mapped[str] = mapped_column(GUID(), primary_key=True, default=new_uuid)
     phone_number: Mapped[str] = mapped_column(String(50), index=True)
     code_hash: Mapped[str] = mapped_column(Text)
-    purpose: Mapped[str] = mapped_column(String(30), default="SIGNUP")
+    purpose: Mapped[str] = mapped_column(String(80), default="SIGNUP")
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

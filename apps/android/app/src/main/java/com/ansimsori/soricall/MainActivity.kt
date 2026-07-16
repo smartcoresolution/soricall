@@ -1,9 +1,14 @@
 package com.ansimsori.soricall
 
+import android.Manifest
+import android.app.role.RoleManager
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -38,6 +43,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -67,17 +73,24 @@ private val Muted = Color(0xFF71837F)
 
 class MainActivity : ComponentActivity() {
     private val incomingRisk = mutableStateOf<String?>(null)
+    private val incomingDeviceToken = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         incomingRisk.value = intent.getStringExtra("risk_level")
-        setContent { SoriCallAndroidApp(incomingRisk.value) }
+        incomingDeviceToken.value = deviceToken(intent)
+        setContent { SoriCallAndroidApp(incomingRisk.value, incomingDeviceToken.value) }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         incomingRisk.value = intent.getStringExtra("risk_level")
+        incomingDeviceToken.value = deviceToken(intent)
     }
+
+    private fun deviceToken(intent: Intent): String? =
+        intent.data?.getQueryParameter("device_token")?.takeIf { it.isNotBlank() }
 }
 
 private enum class AppScreen {
@@ -86,20 +99,27 @@ private enum class AppScreen {
 }
 
 @Composable
-private fun SoriCallAndroidApp(incomingRisk: String?) {
+private fun SoriCallAndroidApp(incomingRisk: String?, incomingDeviceToken: String?) {
     val application = LocalContext.current.applicationContext as SoriCallApplication
+    incomingDeviceToken?.let(application::savePendingDeviceToken)
+    val deviceToken = incomingDeviceToken ?: application.pendingDeviceToken()
     val scope = rememberCoroutineScope()
-    var screen by remember(incomingRisk) {
+    var screen by remember(incomingRisk, deviceToken) {
         mutableStateOf(
             when (incomingRisk) {
                 "CRITICAL" -> AppScreen.BLOCKED
                 "HIGH", "CAUTION" -> AppScreen.ANALYSIS
-                else -> AppScreen.PARENT_READY
+                else -> when {
+                    deviceToken != null -> AppScreen.PARENT_READY
+                    application.configuredSeniorId() != null -> AppScreen.HOME
+                    else -> AppScreen.START
+                }
             },
         )
     }
-    var signupName by remember { mutableStateOf("") }; var signupEmail by remember { mutableStateOf("") }; var signupPassword by remember { mutableStateOf("") }
-    var loginEmail by remember { mutableStateOf("") }; var loginPassword by remember { mutableStateOf("") }
+    var signupName by remember { mutableStateOf("") }; var signupPhone by remember { mutableStateOf("") }; var signupPassword by remember { mutableStateOf("") }
+    var signupVerificationId by remember { mutableStateOf("") }; var signupVerificationCode by remember { mutableStateOf("") }; var signupVerificationToken by remember { mutableStateOf("") }
+    var loginPhone by remember { mutableStateOf("") }; var loginPassword by remember { mutableStateOf("") }
     var familyId by remember { mutableStateOf<String?>(null) }; var protectedUserId by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }; var busy by remember { mutableStateOf(false) }
     fun apiAction(action: suspend () -> Unit) { scope.launch { busy = true; error = null; runCatching { action() }.onFailure { error = it.message ?: "요청을 처리하지 못했습니다." }; busy = false } }
@@ -123,11 +143,29 @@ private fun SoriCallAndroidApp(incomingRisk: String?) {
                 color = Color.Transparent,
             ) {
                 when (screen) {
-                    AppScreen.PARENT_READY -> ParentReadyScreen()
+                    AppScreen.PARENT_READY -> ParentReadyScreen(deviceToken)
                     AppScreen.START -> StartScreen({ screen = AppScreen.SIGNUP }, { screen = AppScreen.LOGIN })
-                    AppScreen.SIGNUP -> SignupScreen(signupName, { signupName = it }, signupEmail, { signupEmail = it }, signupPassword, { signupPassword = it }) { screen = AppScreen.CONSENT }
-                    AppScreen.CONSENT -> ConsentScreen { apiAction { val auth = application.api.register(signupEmail, signupPassword, signupName); application.saveAuth(auth.accessToken, auth.refreshToken, auth.userId); screen = AppScreen.PROTECTED } }
-                    AppScreen.LOGIN -> LoginScreen(loginEmail, { loginEmail = it }, loginPassword, { loginPassword = it }) { apiAction { val auth = application.api.login(loginEmail, loginPassword); application.saveAuth(auth.accessToken, auth.refreshToken, auth.userId); screen = AppScreen.HOME } }
+                    AppScreen.SIGNUP -> SignupScreen(
+                        name = signupName, onName = { signupName = it },
+                        phone = signupPhone, onPhone = { signupPhone = it },
+                        verificationId = signupVerificationId,
+                        verificationCode = signupVerificationCode,
+                        onVerificationCode = { signupVerificationCode = it.filter(Char::isDigit).take(6) },
+                        verified = signupVerificationToken.isNotBlank(),
+                        password = signupPassword, onPassword = { signupPassword = it },
+                        busy = busy,
+                        onSendCode = { apiAction {
+                            val sent = application.api.sendSignupVerification(signupPhone)
+                            signupVerificationId = sent.verificationId
+                            sent.developmentCode?.let { signupVerificationCode = it }
+                        } },
+                        onConfirmCode = { apiAction {
+                            signupVerificationToken = application.api.confirmSignupVerification(signupVerificationId, signupVerificationCode)
+                        } },
+                        onNext = { screen = AppScreen.CONSENT },
+                    )
+                    AppScreen.CONSENT -> ConsentScreen { apiAction { val auth = application.api.register(signupPhone, signupVerificationToken, signupPassword, signupName); application.saveAuth(auth.accessToken, auth.refreshToken, auth.userId); screen = AppScreen.PROTECTED } }
+                    AppScreen.LOGIN -> LoginScreen(loginPhone, { loginPhone = it }, loginPassword, { loginPassword = it }) { apiAction { val auth = application.api.login(loginPhone, loginPassword); application.saveAuth(auth.accessToken, auth.refreshToken, auth.userId); screen = AppScreen.HOME } }
                     AppScreen.PROTECTED -> ProtectedFamilyScreen { name, phone, relation -> apiAction { val userId = checkNotNull(application.currentUserId()) { "로그인이 필요합니다." }; val newFamily = familyId ?: application.api.createFamily("$name 통화보호 가족", userId).also { familyId = it }; protectedUserId = application.api.createProtectedUser(newFamily, ProtectedUserCreateDto(name, phone, protectedRelationCode(relation))); screen = AppScreen.CONTACT } }
                     AppScreen.CONTACT -> ConfirmationContactScreen { name, phone, relation, primary -> apiAction { application.api.createConfirmationContact(checkNotNull(familyId) { "가족 정보가 없습니다." }, checkNotNull(protectedUserId) { "보호받을 가족 정보가 없습니다." }, ConfirmationContactCreateDto(name, phone, contactRelationCode(relation), primary)); screen = AppScreen.BIOMETRICS } }
                     AppScreen.BIOMETRICS -> BiometricsScreen { screen = AppScreen.HOME }
@@ -147,20 +185,130 @@ private fun SoriCallAndroidApp(incomingRisk: String?) {
 }
 
 @Composable
-private fun ParentReadyScreen() {
-    val activity = LocalContext.current as? ComponentActivity
+private fun ParentReadyScreen(deviceToken: String?) {
+    if (deviceToken != null) {
+        DeviceEnrollmentScreen(deviceToken)
+        return
+    }
     Page {
         Spacer(Modifier.height(34.dp))
         StatusIcon("✓", TealSoft, Teal, 92)
         Spacer(Modifier.height(26.dp))
         Text("SoriCall 설치 완료", fontSize = 29.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
         Spacer(Modifier.height(12.dp))
-        Body("부모님 전화 보호를 연결하려면\n방금 전 설치 안내 화면으로 돌아가 주세요.", centered = true)
+        Body("부모님 전화 보호를 연결하려면\n문자나 카카오톡으로 받은 초대 링크를 다시 눌러 주세요.", centered = true)
         Spacer(Modifier.height(24.dp))
-        InfoCard("다음 단계", "설치 안내 화면에서 ‘설치를 완료했어요’를 누른 뒤 휴대전화 본인 확인과 권한 설정을 진행합니다.")
+        InfoCard("다음 단계", "초대 링크를 다시 누르면 SoriCall 앱 안에서 휴대전화 본인 확인과 권한 설정을 계속합니다. 앱을 다시 설치할 필요는 없습니다.")
         Spacer(Modifier.weight(1f))
-        PrimaryButton("설치 안내 화면으로 돌아가기", { activity?.finish() })
-        Caption("화면이 닫히면 브라우저의 SoriCall 설치 안내가 다시 표시됩니다.")
+        Caption("초대 링크에는 부모님 휴대전화와 연결하기 위한 안전한 일회용 정보가 포함되어 있습니다.")
+    }
+}
+
+@Composable
+private fun DeviceEnrollmentScreen(token: String) {
+    val context = LocalContext.current
+    val application = context.applicationContext as SoriCallApplication
+    val scope = rememberCoroutineScope()
+    var enrollment by remember { mutableStateOf<com.ansimsori.soricall.core.network.DeviceEnrollmentDto?>(null) }
+    var phone by remember { mutableStateOf("") }
+    var verificationId by remember { mutableStateOf("") }
+    var code by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var permissionsReady by remember { mutableStateOf(false) }
+
+    val roleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        val roleManager = context.getSystemService(RoleManager::class.java)
+        permissionsReady = roleManager?.isRoleHeld(RoleManager.ROLE_CALL_SCREENING) == true
+        if (!permissionsReady) error = "통화 보호 앱 권한을 허용해 주세요."
+    }
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+        val denied = result.filterValues { !it }.keys
+        if (denied.isNotEmpty()) {
+            error = "전화·마이크·알림 권한을 모두 허용해 주세요."
+        } else {
+            val roleManager = context.getSystemService(RoleManager::class.java)
+            if (roleManager != null && roleManager.isRoleAvailable(RoleManager.ROLE_CALL_SCREENING) && !roleManager.isRoleHeld(RoleManager.ROLE_CALL_SCREENING)) {
+                roleLauncher.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_CALL_SCREENING))
+            } else {
+                permissionsReady = true
+            }
+        }
+    }
+
+    fun work(action: suspend () -> Unit) {
+        if (busy) return
+        scope.launch {
+            busy = true
+            error = null
+            runCatching { action() }.onFailure { error = it.message ?: "요청을 처리하지 못했습니다." }
+            busy = false
+        }
+    }
+
+    LaunchedEffect(token) {
+        application.savePendingDeviceToken(token)
+        work { enrollment = application.api.resolveDeviceEnrollment(token) }
+    }
+
+    Page {
+        Spacer(Modifier.height(18.dp))
+        StatusIcon(if (enrollment?.status == "ACTIVE") "✓" else "☎", TealSoft, Teal, 82)
+        Spacer(Modifier.height(18.dp))
+        Text(
+            if (enrollment?.status == "ACTIVE") "통화 보호 연결 완료" else "부모님 전화 보호 연결",
+            fontSize = 27.sp,
+            fontWeight = FontWeight.ExtraBold,
+            color = Ink,
+        )
+        Spacer(Modifier.height(8.dp))
+        Body(
+            enrollment?.let { "${it.protectedUserName}님의 휴대전화에서\n본인 확인과 권한 설정을 진행합니다." }
+                ?: "안전한 연결 정보를 확인하고 있습니다.",
+            centered = true,
+        )
+        Spacer(Modifier.height(20.dp))
+        error?.let { InfoCard("확인해 주세요", it) }
+        when {
+            enrollment == null -> InfoCard("연결 확인 중", "잠시만 기다려 주세요.")
+            enrollment?.status == "ACTIVE" -> InfoCard("보호가 시작됐습니다", "이제 SoriCall이 의심되는 수신 전화를 확인하고 위험 상황을 안내합니다.")
+            enrollment?.status == "INVITED" -> {
+                InfoCard("휴대전화 본인 확인", "등록된 번호 끝 ${enrollment?.phoneNumberLast4 ?: "----"}와 일치하는 부모님 번호를 입력해 주세요.")
+                Input("휴대전화 번호", "010-0000-0000", phone, { phone = it })
+                if (verificationId.isBlank()) {
+                    PrimaryButton("인증번호 받기", { work {
+                        val sent = application.api.sendDeviceVerification(token, phone)
+                        verificationId = sent.verificationId
+                        sent.developmentCode?.let { code = it }
+                    } }, phone.replace("-", "").length in 10..11 && !busy)
+                } else {
+                    Input("문자 인증번호", "6자리 인증번호", code, { code = it.filter(Char::isDigit).take(6) })
+                    PrimaryButton("본인 확인", { work {
+                        enrollment = application.api.confirmDeviceVerification(token, verificationId, code)
+                    } }, code.length == 6 && !busy)
+                }
+            }
+            enrollment?.status == "PHONE_VERIFIED" && !permissionsReady -> {
+                InfoCard("통화 보호 권한 설정", "전화 식별, 마이크, 알림 권한과 Android의 통화 보호 앱 역할을 허용해 주세요.")
+                PrimaryButton("권한 설정 시작", {
+                    val permissions = buildList {
+                        add(Manifest.permission.READ_PHONE_STATE)
+                        add(Manifest.permission.RECORD_AUDIO)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                    permissionLauncher.launch(permissions.toTypedArray())
+                })
+            }
+            else -> {
+                InfoCard("마지막 단계", "필요한 Android 권한이 설정됐습니다. 통화 보호를 활성화해 주세요.")
+                PrimaryButton("통화 보호 시작", { work {
+                    val result = application.api.completeDeviceEnrollment(token)
+                    application.completeDeviceConnection(result.protectedUserId)
+                    enrollment = result
+                } }, !busy)
+            }
+        }
+        if (busy) Caption("안전하게 처리하고 있습니다…")
     }
 }
 
@@ -169,27 +317,60 @@ private fun contactRelationCode(value: String) = mapOf("아들" to "SON", "딸" 
 
 @Composable
 private fun StartScreen(onSignup: () -> Unit, onLogin: () -> Unit) = Page {
-    Spacer(Modifier.height(40.dp))
-    StatusIcon("✓", TealSoft, Teal, 92)
+    Spacer(Modifier.height(16.dp))
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        OutlinedButton(onClick = onSignup, shape = RoundedCornerShape(24.dp)) {
+            Text("♙+  회원가입", color = Teal, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+        }
+    }
+    Spacer(Modifier.height(22.dp))
+    Text("SoriCall", fontSize = 42.sp, fontWeight = FontWeight.ExtraBold, color = Teal)
+    Text("AI 가족 사칭 전화 보호", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = Ink)
     Spacer(Modifier.height(28.dp))
-    Text("부모님의 전화를", fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
-    Text("보이스피싱으로부터", fontSize = 31.sp, fontWeight = FontWeight.ExtraBold, color = Teal)
-    Text("지켜드립니다", fontSize = 28.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
+    StatusIcon("☎", Color(0xFFF3C5A7), Color.White, 112)
+    Spacer(Modifier.height(30.dp))
+    Text("부모님의 안전한 통화를", fontSize = 25.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF171717))
+    Text("가족의 목소리로 지켜드립니다.", fontSize = 25.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF171717))
     Spacer(Modifier.height(18.dp))
     Body("가족의 전화번호와 목소리를 기억하고,\n의심되는 통화는 가족에게 한 번 더 확인합니다.", centered = true)
     Spacer(Modifier.weight(1f))
-    PrimaryButton("통화 보호 시작하기", onSignup)
-    TextButtonLine("이미 가입했어요", onLogin)
+    PrimaryButton("서비스 시작", onLogin)
+    Caption("♧  보이스피싱 위험을 줄이기 위한 가족 통화 보호 서비스입니다.")
 }
 
 @Composable
-private fun SignupScreen(name: String, onName: (String) -> Unit, email: String, onEmail: (String) -> Unit, password: String, onPassword: (String) -> Unit, onNext: () -> Unit) = FormPage("1 / 3", "가족의 안심을 시작해요", "통화 보호와 가족 확인에 사용할 정보를 입력해 주세요.") {
+private fun SignupScreen(
+    name: String,
+    onName: (String) -> Unit,
+    phone: String,
+    onPhone: (String) -> Unit,
+    verificationId: String,
+    verificationCode: String,
+    onVerificationCode: (String) -> Unit,
+    verified: Boolean,
+    password: String,
+    onPassword: (String) -> Unit,
+    busy: Boolean,
+    onSendCode: () -> Unit,
+    onConfirmCode: () -> Unit,
+    onNext: () -> Unit,
+) = FormPage("회원가입", "가족의 안심을 시작해요", "휴대전화 본인 확인 후 가입 정보를 입력해 주세요.") {
     var confirmation by remember { mutableStateOf("") }
     Input("이름", "이름을 입력해 주세요", name, onName)
-    Input("이메일", "example@email.com", email, onEmail)
+    Input("휴대전화 번호", "010-0000-0000", phone, onPhone)
+    if (!verified) {
+        if (verificationId.isBlank()) {
+            OutlinedFullButton(if (busy) "요청 중…" else "인증번호 받기", onSendCode)
+        } else {
+            Input("문자 인증번호", "6자리 인증번호", verificationCode, onVerificationCode)
+            OutlinedFullButton(if (busy) "확인 중…" else "인증번호 확인", onConfirmCode)
+        }
+    } else {
+        InfoCard("휴대전화 인증 완료", "확인된 번호로 SoriCall 계정을 만듭니다.")
+    }
     Input("비밀번호", "8자 이상 입력", password, onPassword, password = true)
     Input("비밀번호 확인", "한 번 더 입력", confirmation, { confirmation = it }, password = true)
-    PrimaryButton("다음", onNext, name.isNotBlank() && email.isNotBlank() && password.length >= 8 && password == confirmation)
+    PrimaryButton("약관 동의로 이동", onNext, verified && name.isNotBlank() && password.length >= 8 && password == confirmation)
     Caption("🔒 개인정보는 암호화하여 안전하게 보관합니다.")
 }
 
@@ -208,10 +389,10 @@ private fun ConsentScreen(onNext: () -> Unit) {
 }
 
 @Composable
-private fun LoginScreen(email: String, onEmail: (String) -> Unit, password: String, onPassword: (String) -> Unit, onLogin: () -> Unit) = FormPage(null, "다시 만나서 반가워요", "등록한 계정으로 로그인해 주세요.") {
-    Input("이메일", "example@email.com", email, onEmail)
+private fun LoginScreen(phone: String, onPhone: (String) -> Unit, password: String, onPassword: (String) -> Unit, onLogin: () -> Unit) = FormPage(null, "다시 만나서 반가워요", "등록한 휴대전화 번호로 로그인해 주세요.") {
+    Input("휴대전화 번호", "010-0000-0000", phone, onPhone)
     Input("비밀번호", "비밀번호", password, onPassword, password = true)
-    PrimaryButton("로그인", onLogin, email.isNotBlank() && password.isNotBlank())
+    PrimaryButton("로그인", onLogin, phone.replace("-", "").length in 10..11 && password.isNotBlank())
     TextButtonLine("비밀번호를 잊으셨나요?", {})
 }
 

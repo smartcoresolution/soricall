@@ -82,7 +82,13 @@ const isValidMobilePhone = (value: string) => /^01[016789]-?\d{3,4}-?\d{4}$/.tes
 
 function App() {
   const enrollmentToken = new URLSearchParams(window.location.search).get("token");
-  const deviceToken = new URLSearchParams(window.location.search).get("device_token");
+  const query = new URLSearchParams(window.location.search);
+  const tokenFromLink = query.get("device_token");
+  if (tokenFromLink) window.localStorage.setItem("soricall_device_enrollment_token", tokenFromLink);
+  const deviceToken = tokenFromLink ?? (query.get("resume_device_enrollment") === "1"
+    ? window.localStorage.getItem("soricall_device_enrollment_token")
+    : null);
+  const missingResumeToken = query.get("resume_device_enrollment") === "1" && !deviceToken;
   const sessionRestoreStartedRef = useRef(false);
   const [screen, setScreen] = useState<Screen>(deviceToken ? "parentConnect" : enrollmentToken ? "biometrics" : "welcome");
   const [setupMode, setSetupMode] = useState<SetupMode>("helper");
@@ -564,7 +570,9 @@ function App() {
         {screen !== "welcome" && screen !== "home" && screen !== "signupComplete" && (
           <button className="back-button" onClick={goBack}><ArrowLeft size={18} /> 이전</button>
         )}
-        {screen === "welcome" && <Welcome onSignup={() => setScreen("signup")} onLogin={() => { setApiError(""); setScreen("login"); }} />}
+        {screen === "welcome" && (missingResumeToken
+          ? <ResumeDeviceEnrollmentMissing />
+          : <Welcome onSignup={() => setScreen("signup")} onLogin={() => { setApiError(""); setScreen("login"); }} />)}
         {screen === "parentConnect" && deviceToken && <ParentDeviceConnect token={deviceToken} />}
         {screen === "setupChoice" && <SetupChoice onSelect={(mode) => { setSetupMode(mode); if (mode === "self") { const phone = session?.user.phone_number ?? signup.phone; if (isValidMobilePhone(phone)) chooseProtectionMode("self"); else { setApiError(""); setScreen("selfPhone"); } } else void openHelperProtection(); }} />}
         {screen === "selfPhone" && <SelfPhone value={signup.phone} setValue={(phone) => setSignup((current) => ({ ...current, phone }))} onNext={() => chooseProtectionMode("self")} />}
@@ -898,16 +906,30 @@ function ParentDeviceConnect({ token }: { token: string }) {
   });
   const complete = () => void action(async () => {
     const result = await apiPost<DeviceEnrollment>(`/api/v1/device-enrollments/complete?token=${encodeURIComponent(token)}`, {});
+    window.localStorage.removeItem("soricall_device_enrollment_token");
     setEnrollment(result); setStep("complete");
   });
 
   if (!enrollment && !error) return <FormCard title="연결 정보를 확인하고 있습니다" description="잠시만 기다려 주세요."><div className="info-box"><span><Activity /></span><p>부모님 통화 보호 연결을 준비하고 있습니다.</p></div></FormCard>;
   return <FormCard step="부모님 휴대전화 연결" title={step === "complete" ? "통화 보호 연결이 완료됐어요" : `${enrollment?.protected_user_name ?? "부모님"}님의 전화를 보호해요`} description={step === "complete" ? "이제 이 휴대전화에서 SoriCall 통화 보호가 시작됩니다." : "아래 순서대로 앱 설치와 본인 확인을 진행해 주세요."}>
     {error && <div className="inline-api-error" role="alert"><span>{error}</span></div>}
-    {step === "download" && <><div className="connect-hero"><Phone /><b>SoriCall Android 앱</b><small>다운로드가 끝나면 표시되는 SoriCall.apk를 눌러 설치해 주세요.</small></div><a className="primary full download-link" href={apkUrl} onClick={() => setDownloadStarted(true)}><Download /> Android 앱 다운로드 · 설치 열기</a>{downloadStarted && <div className="download-install-guide" role="status"><Download /><span><b>다운로드가 시작됐습니다.</b><small>화면 위의 다운로드 완료 알림에서 <strong>SoriCall.apk</strong>를 누르세요. 알림이 없다면 브라우저 메뉴의 ‘다운로드’를 열어 주세요.</small></span></div>}<button className="secondary full" onClick={() => setStep("verify")}>설치를 완료했어요</button></>}
+    {step === "download" && <><div className="connect-hero"><Phone /><b>SoriCall Android 앱</b><small>다운로드가 끝나면 표시되는 SoriCall.apk를 눌러 설치해 주세요.</small></div><a className="primary full download-link" href={apkUrl} onClick={() => setDownloadStarted(true)}><Download /> Android 앱 다운로드 · 설치 열기</a>{downloadStarted && <div className="download-install-guide" role="status"><Download /><span><b>다운로드가 시작됐습니다.</b><small>화면 위의 다운로드 완료 알림에서 <strong>SoriCall.apk</strong>를 눌러 설치한 뒤 이 안내 링크를 다시 열어 주세요.</small></span></div>}<button className="secondary full" onClick={() => { window.location.href = `soricall://connect?device_token=${encodeURIComponent(token)}`; }}>설치를 완료했어요 · SoriCall 열기</button></>}
     {step === "verify" && <><InfoBox icon={<Shield />}><b>등록된 부모님 휴대전화인지 확인합니다.</b><br/>휴대전화 끝 {enrollment?.phone_number_last4 ?? "----"} 번호로 인증해 주세요.</InfoBox><Field label="부모님 휴대전화 번호" placeholder="010-0000-0000" type="tel" value={phone} onChange={setPhone}/><button className="secondary full" disabled={busy || !isValidMobilePhone(phone)} onClick={sendCode}>인증번호 받기</button>{verificationId && <><Field label="문자 인증번호" placeholder="6자리 인증번호" value={code} onChange={(value) => setCode(value.replace(/\D/g, "").slice(0, 6))}/><button className="primary full" disabled={busy || code.length !== 6} onClick={confirmCode}>인증하고 계속하기</button></>}</>}
     {step === "permissions" && <><div className="permission-list">{[["전화 식별 권한", "걸려오는 번호를 확인하고 위험 통화를 안내합니다."], ["마이크 권한", "통화 중 음성 위험 신호를 분석합니다."], ["알림 권한", "위험 감지와 가족 확인 결과를 알려드립니다."]].map(([title, detail], index) => <label key={title}><input type="checkbox" checked={permissions[index]} onChange={() => setPermissions((current) => current.map((value, item) => item === index ? !value : value))}/><span><b>{title}</b><small>{detail}</small></span></label>)}</div><InfoBox icon={<Phone />}><b>설치한 앱을 열어 위 권한을 허용해 주세요.</b><br/>앱 설정을 마친 뒤 각 항목을 확인하면 연결을 완료할 수 있습니다.</InfoBox><button className="primary full" disabled={busy || !permissions.every(Boolean)} onClick={complete}>권한 설정 완료 · 보호 시작</button></>}
     {step === "complete" && <><div className="connection-complete"><CheckCircle2 /><b>{enrollment?.protected_user_name}님 통화 보호 켜짐</b><small>자녀의 SoriCall 화면에도 연결 완료 상태가 표시됩니다.</small></div><button className="primary full" onClick={() => window.close()}>완료</button></>}
+  </FormCard>;
+}
+
+function ResumeDeviceEnrollmentMissing() {
+  return <FormCard
+    step="부모님 휴대전화 연결"
+    title="처음 받은 연결 링크를 다시 열어 주세요"
+    description="앱 설치는 완료됐지만 이 브라우저에는 연결 정보가 남아 있지 않습니다."
+  >
+    <InfoBox icon={<Phone />}>
+      <b>문자나 카카오톡으로 받은 SoriCall 설치 안내 링크를 다시 눌러 주세요.</b><br/>
+      앱을 다시 다운로드할 필요는 없습니다. 안내 화면에서 ‘설치를 완료했어요’를 누르면 본인 확인을 계속할 수 있습니다.
+    </InfoBox>
   </FormCard>;
 }
 
