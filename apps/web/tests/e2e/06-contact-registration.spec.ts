@@ -22,8 +22,8 @@ test("화면 6: 확인 가족을 여러 명 실제 API에 등록한다", async (
   await page.getByRole("button", { name: "다음: 확인 가족 등록" }).click();
 
   await expect(page.getByRole("heading", { name: "의심전화를 확인해 줄 가족을 등록해 주세요" })).toBeVisible();
-  const add = page.getByRole("button", { name: /확인 가족 한 명 더 추가/ });
-  const next = page.getByRole("button", { name: "다음: 음성·얼굴 등록 요청" });
+  const add = page.getByRole("button", { name: /이 가족 추가하기/ });
+  const next = page.getByRole("button", { name: "가족 등록 완료 · 음성·얼굴 등록" });
   await expect(add).toBeDisabled();
   await expect(next).toBeDisabled();
 
@@ -54,7 +54,7 @@ test("화면 6: 확인 가족을 여러 명 실제 API에 등록한다", async (
   const secondResponse = page.waitForResponse((response) =>
     response.url().includes("/confirmation-contacts") && response.request().method() === "POST",
   );
-  await next.click();
+  await add.click();
   const response = await secondResponse;
   expect(response.status()).toBe(201);
   expect(response.request().postDataJSON()).toMatchObject({
@@ -62,6 +62,8 @@ test("화면 6: 확인 가족을 여러 명 실제 API에 등록한다", async (
     relation_code: "DAUGHTER",
     phone_number: "010-5555-6666",
   });
+  await expect(page.getByText("2명의 확인 가족을 등록했습니다.")).toBeVisible();
+  await next.click();
   await expect(page.getByRole("heading", { name: "가족별 등록 항목을 확인해 주세요" })).toBeVisible();
   await expect(page.getByText("음성 등록", { exact: true })).toBeVisible();
   await expect(page.getByText("얼굴 등록", { exact: true })).toBeVisible();

@@ -28,7 +28,7 @@ const contactRelationCodes: Record<string, string> = { 아들: "SON", 딸: "DAUG
 type AuthResponse = { access_token: string; refresh_token: string; user: UserPublic };
 type ProtectedUserResponse = { id: string; name?: string; relation_code?: string; phone_number_last4?: string | null; protection_status?: string };
 type RegisteredProtectedFamily = { id: string; name: string; relation: string; phoneLast4: string; status?: string };
-type ConfirmationContactResponse = { id: string; name: string };
+type ConfirmationContactResponse = { id: string; name: string; relation_code?: string | null; phone_number_last4?: string | null };
 type FamilyMemberView = { id: string; name: string; relation: string | null };
 type VoiceProfileCreated = { id: string; status?: string };
 type FaceProfileView = { id: string; status?: string };
@@ -90,6 +90,7 @@ function App() {
     : null);
   const missingResumeToken = query.get("resume_device_enrollment") === "1" && !deviceToken;
   const sessionRestoreStartedRef = useRef(false);
+  const newSignupStartedRef = useRef(false);
   const [screen, setScreen] = useState<Screen>(deviceToken ? "parentConnect" : enrollmentToken ? "biometrics" : "welcome");
   const [setupMode, setSetupMode] = useState<SetupMode>("helper");
   const [protectedRelation, setProtectedRelation] = useState("아버지");
@@ -111,6 +112,16 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [apiError, setApiError] = useState("");
   const [apiMessage, setApiMessage] = useState("");
+
+  const resetFamilyState = () => {
+    setFamilyId(null);
+    setProtectedUserId(null);
+    setProtectedFamilies([]);
+    setEnrollmentContact(null);
+    setEnrollmentContacts([]);
+    setInvitations([]);
+    setParentInstallLink("");
+  };
 
   useEffect(() => {
     if (window.location.protocol === "http:" && window.location.hostname === "175.118.124.67") {
@@ -153,11 +164,13 @@ function App() {
     setBusy(true);
     apiPost<AuthResponse>("/api/v1/auth/refresh", { refresh_token: saved.refresh_token })
       .then((refreshed) => {
+        if (newSignupStartedRef.current) return;
         setApiAccessToken(refreshed.access_token);
         persistSession(refreshed);
         setSession(refreshed);
       })
       .catch(() => {
+        if (newSignupStartedRef.current) return;
         persistSession(null);
         setApiAccessToken(null);
       })
@@ -171,7 +184,11 @@ function App() {
       try {
         const families = await apiGet<Family[]>("/api/v1/families");
         const family = families[0];
-        if (!family || cancelled) return;
+        if (!family) {
+          if (!cancelled) resetFamilyState();
+          return;
+        }
+        if (cancelled) return;
         const protectedUsers = await apiGet<ProtectedUserResponse[]>(`/api/v1/families/${family.id}/protected-call-users`);
         const protectedUser = protectedUsers[0];
         const [contacts, restoredInvitations] = await Promise.all([
@@ -236,6 +253,24 @@ function App() {
     finally { setBusy(false); }
   };
 
+  const startNewSignup = () => {
+    newSignupStartedRef.current = true;
+    persistSession(null);
+    setApiAccessToken(null);
+    setSession(null);
+    resetFamilyState();
+    setSignup({ name: "", phone: "", verificationId: "", verificationCode: "", verificationToken: "", password: "", passwordConfirm: "" });
+    setLogin({ phone_number: "", password: "" });
+    setAgreed([false, false, false, false, false]);
+    setProtectedForm({ name: "", phone: "" });
+    setContactForm({ name: "", phone: "", primary: true });
+    setProtectedRelation("아버지");
+    setContactRelation("딸");
+    setApiError("");
+    setApiMessage("");
+    setScreen("signup");
+  };
+
   const register = () => runApi(async () => {
     if (signup.password !== signup.passwordConfirm) throw new Error("비밀번호 확인이 일치하지 않습니다.");
     let auth: AuthResponse;
@@ -249,6 +284,7 @@ function App() {
       }
       throw error;
     }
+    resetFamilyState();
     setApiAccessToken(auth.access_token); persistSession(auth); setSession(auth); setScreen("signupComplete");
   });
   const sendSignupCode = () => runApi(async () => {
@@ -263,6 +299,7 @@ function App() {
   });
   const signIn = () => runApi(async () => {
     const auth = await apiPost<AuthResponse>("/api/v1/auth/login", login);
+    resetFamilyState();
     setApiAccessToken(auth.access_token); persistSession(auth); setSession(auth);
     setScreen("setupChoice");
   });
@@ -281,12 +318,10 @@ function App() {
   const openHelperProtection = () => runApi(async () => {
     if (!session) throw new Error("먼저 회원가입 또는 로그인이 필요합니다.");
     setSetupMode("helper");
-    let currentFamilyId = familyId;
-    if (!currentFamilyId) {
-      const families = await apiGet<Family[]>("/api/v1/families");
-      currentFamilyId = families[0]?.id ?? null;
-      if (currentFamilyId) setFamilyId(currentFamilyId);
-    }
+    const families = await apiGet<Family[]>("/api/v1/families");
+    const accessibleFamilyIds = new Set(families.map((family) => family.id));
+    let currentFamilyId = familyId && accessibleFamilyIds.has(familyId) ? familyId : (families[0]?.id ?? null);
+    if (currentFamilyId !== familyId) setFamilyId(currentFamilyId);
     if (!currentFamilyId) {
       setScreen("protected");
       return;
@@ -400,19 +435,34 @@ function App() {
     }
     await openNextRegistrationStep({ id: selfMember.id, name: selfMember.name });
   });
-  const saveContact = (continueToBiometrics: boolean) => runApi(async () => {
+  const saveContact = () => runApi(async () => {
     if (!familyId || !protectedUserId) throw new Error("보호받을 가족을 먼저 등록해 주세요.");
     const contact = await apiPost<ConfirmationContactResponse>(`/api/v1/families/${familyId}/protected-call-users/${protectedUserId}/confirmation-contacts`, { name: contactForm.name, phone_number: contactForm.phone, relation_code: contactRelationCodes[contactRelation], is_primary_contact: contactForm.primary, notification_priority: 1, notify_enabled: true });
     setEnrollmentContact(contact);
     setEnrollmentContacts((current) => [...current, contact]);
-    if (continueToBiometrics) {
-      setScreen("registrationPlan");
-    } else {
-      setContactForm({ name: "", phone: "", primary: false });
-      setContactRelation("아들");
-      setApiMessage("확인 가족을 추가했습니다.");
-    }
+    setContactForm({ name: "", phone: "", primary: false });
+    setContactRelation("아들");
+    setApiMessage("확인 가족을 추가했습니다.");
   });
+  const finishContacts = () => {
+    if (enrollmentContacts.length === 0) {
+      setApiError("확인 가족을 한 명 이상 추가해 주세요.");
+      return;
+    }
+    setApiError("");
+    setApiMessage("");
+    setScreen("registrationPlan");
+  };
+  const removeContact = (contact: ConfirmationContactResponse) => {
+    if (!window.confirm(`${contact.name}님을 확인 가족에서 삭제할까요?`)) return;
+    void runApi(async () => {
+      if (!familyId || !protectedUserId) throw new Error("가족 정보가 없습니다.");
+      await apiDelete(`/api/v1/families/${familyId}/protected-call-users/${protectedUserId}/confirmation-contacts/${contact.id}`);
+      setEnrollmentContacts((current) => current.filter((item) => item.id !== contact.id));
+      if (enrollmentContact?.id === contact.id) setEnrollmentContact(null);
+      setApiMessage(`${contact.name}님을 확인 가족에서 삭제했습니다.`);
+    });
+  };
   const sendEnrollmentInvitations = () => runApi(async () => {
     if (!familyId || enrollmentContacts.length === 0) throw new Error("등록 요청을 보낼 가족이 없습니다.");
     const sent = await Promise.all(enrollmentContacts.map((contact) =>
@@ -572,7 +622,7 @@ function App() {
         )}
         {screen === "welcome" && (missingResumeToken
           ? <ResumeDeviceEnrollmentMissing />
-          : <Welcome onSignup={() => setScreen("signup")} onLogin={() => { setApiError(""); setScreen("login"); }} />)}
+          : <Welcome onSignup={startNewSignup} onLogin={() => { setApiError(""); setScreen("login"); }} />)}
         {screen === "parentConnect" && deviceToken && <ParentDeviceConnect token={deviceToken} />}
         {screen === "setupChoice" && <SetupChoice onSelect={(mode) => { setSetupMode(mode); if (mode === "self") { const phone = session?.user.phone_number ?? signup.phone; if (isValidMobilePhone(phone)) chooseProtectionMode("self"); else { setApiError(""); setScreen("selfPhone"); } } else void openHelperProtection(); }} />}
         {screen === "selfPhone" && <SelfPhone value={signup.phone} setValue={(phone) => setSignup((current) => ({ ...current, phone }))} onNext={() => chooseProtectionMode("self")} />}
@@ -581,7 +631,7 @@ function App() {
         {screen === "signupComplete" && <SignupComplete onNext={() => { setLogin({ phone_number: signup.phone, password: "" }); setScreen("login"); }} />}
         {screen === "login" && <Login value={login} setValue={setLogin} onNext={signIn} error={apiError} onClearError={() => setApiError("")} />}
         {screen === "protected" && <FamilyRegistration value={protectedForm} setValue={setProtectedForm} relation={protectedRelation} setRelation={setProtectedRelation} families={protectedFamilies} onAdd={addProtectedFamily} onDelete={removeProtectedFamily} onNext={finishProtectedFamilies} busy={busy} />}
-        {screen === "contacts" && <ContactRegistration value={contactForm} setValue={setContactForm} relation={contactRelation} setRelation={setContactRelation} onAdd={() => saveContact(false)} onNext={() => saveContact(true)} />}
+        {screen === "contacts" && <ContactRegistration value={contactForm} setValue={setContactForm} relation={contactRelation} setRelation={setContactRelation} contacts={enrollmentContacts} onAdd={saveContact} onDelete={removeContact} onNext={finishContacts} busy={busy} />}
         {screen === "deviceInvite" && <DeviceInvite familyName={protectedForm.name} link={parentInstallLink} onNext={() => setScreen("contacts")} />}
         {screen === "registrationPlan" && <RegistrationPlan contacts={enrollmentContacts} onNext={() => setScreen("invite")} />}
         {screen === "invite" && <EnrollmentInvite contacts={enrollmentContacts} onSend={sendEnrollmentInvitations} />}
@@ -650,12 +700,12 @@ function SelfPhone({ value, setValue, onNext }: { value: string; setValue: (phon
 </FormCard>; }
 
 function Signup({ value, setValue, onSendCode, onConfirmCode, onNext, busy }: { value: {name:string;phone:string;verificationId:string;verificationCode:string;verificationToken:string;password:string;passwordConfirm:string}; setValue: React.Dispatch<React.SetStateAction<typeof value>>; onSendCode: () => void; onConfirmCode: () => void; onNext: () => void; busy: boolean }) { return <FormCard step="1 / 3" title="가족의 안심을 시작해요" description="휴대전화 문자 인증으로 안전하게 가입합니다.">
-  <Field label="이름" placeholder="이름을 입력해 주세요" value={value.name} onChange={name => setValue(v => ({...v,name}))}/>
-  <label className="field"><span>본인 휴대전화 번호</span><div><input aria-label="본인 휴대전화 번호" placeholder="010-0000-0000" type="tel" value={value.phone} disabled={Boolean(value.verificationToken)} onChange={e => setValue(v => ({...v,phone:e.target.value,verificationId:"",verificationCode:"",verificationToken:""}))}/><button disabled={busy || !isValidMobilePhone(value.phone) || Boolean(value.verificationToken)} onClick={onSendCode}>{value.verificationId ? "재전송" : "인증번호 받기"}</button></div></label>
+  <Field label="이름" placeholder="이름을 입력해 주세요" autoComplete="off" value={value.name} onChange={name => setValue(v => ({...v,name}))}/>
+  <label className="field"><span>본인 휴대전화 번호</span><div><input aria-label="본인 휴대전화 번호" autoComplete="off" placeholder="010-0000-0000" type="tel" value={value.phone} disabled={Boolean(value.verificationToken)} onChange={e => setValue(v => ({...v,phone:e.target.value,verificationId:"",verificationCode:"",verificationToken:""}))}/><button disabled={busy || !isValidMobilePhone(value.phone) || Boolean(value.verificationToken)} onClick={onSendCode}>{value.verificationId ? "재전송" : "인증번호 받기"}</button></div></label>
   {value.phone && !isValidMobilePhone(value.phone) && <span className="validation-error">올바른 휴대전화 번호를 입력해 주세요.</span>}
   {value.verificationId && !value.verificationToken && <label className="field"><span>문자 인증번호</span><div><input aria-label="문자 인증번호" inputMode="numeric" maxLength={6} placeholder="6자리 인증번호" value={value.verificationCode} onChange={e => setValue(v => ({...v,verificationCode:e.target.value.replace(/\D/g, "")}))}/><button disabled={busy || value.verificationCode.length !== 6} onClick={onConfirmCode}>인증 확인</button></div></label>}
   {value.verificationToken && <div className="info-box"><span><Check /></span><p><b>휴대전화 인증이 완료됐습니다.</b></p></div>}
-  <Field label="비밀번호" placeholder="8자 이상 입력해 주세요" type="password" value={value.password} onChange={password => setValue(v => ({...v,password}))}/>{value.password && value.password.length < 8 && <span className="validation-error">비밀번호는 8자 이상 입력해 주세요.</span>}<Field label="비밀번호 확인" placeholder="한 번 더 입력해 주세요" type="password" value={value.passwordConfirm} onChange={passwordConfirm => setValue(v => ({...v,passwordConfirm}))}/>{value.passwordConfirm && value.password !== value.passwordConfirm && <span className="validation-error">비밀번호 확인이 일치하지 않습니다.</span>}
+  <Field label="비밀번호" placeholder="8자 이상 입력해 주세요" type="password" autoComplete="new-password" value={value.password} onChange={password => setValue(v => ({...v,password}))}/>{value.password && value.password.length < 8 && <span className="validation-error">비밀번호는 8자 이상 입력해 주세요.</span>}<Field label="비밀번호 확인" placeholder="한 번 더 입력해 주세요" type="password" autoComplete="new-password" value={value.passwordConfirm} onChange={passwordConfirm => setValue(v => ({...v,passwordConfirm}))}/>{value.passwordConfirm && value.password !== value.passwordConfirm && <span className="validation-error">비밀번호 확인이 일치하지 않습니다.</span>}
   <button className="primary full" disabled={!value.name.trim() || !value.verificationToken || value.password.length < 8 || value.password !== value.passwordConfirm} onClick={onNext}>다음</button><p className="form-note"><LockKeyhole /> 개인정보는 암호화하여 안전하게 보관합니다.</p>
 </FormCard>; }
 
@@ -698,10 +748,13 @@ function DeviceInvite({ familyName, link, onNext }: { familyName: string; link: 
   <code className="development-link">{link}</code><button className="secondary full" onClick={() => void navigator.clipboard.writeText(link)}>연결 링크 복사</button><button className="primary full" onClick={onNext}>다음: 확인 가족 등록</button>
 </FormCard>; }
 
-function ContactRegistration({ value, setValue, relation, setRelation, onAdd, onNext }: { value:{name:string;phone:string;primary:boolean}; setValue:React.Dispatch<React.SetStateAction<typeof value>>; relation: string; setRelation: (v: string) => void; onAdd: () => void; onNext: () => void }) { const valid = Boolean(value.name.trim()) && isValidMobilePhone(value.phone); return <FormCard step="2 / 3" title="의심전화를 확인해 줄 가족을 등록해 주세요" description="보호받을 가족에게 의심전화가 오면 실제 통화 여부를 확인합니다.">
+function ContactRegistration({ value, setValue, relation, setRelation, contacts, onAdd, onDelete, onNext, busy }: { value:{name:string;phone:string;primary:boolean}; setValue:React.Dispatch<React.SetStateAction<typeof value>>; relation: string; setRelation: (v: string) => void; contacts: ConfirmationContactResponse[]; onAdd: () => void; onDelete: (contact: ConfirmationContactResponse) => void; onNext: () => void; busy: boolean }) { const valid = Boolean(value.name.trim()) && isValidMobilePhone(value.phone); return <FormCard step="2 / 3" title="의심전화를 확인해 줄 가족을 등록해 주세요" description="보호받을 가족에게 의심전화가 오면 실제 통화 여부를 확인합니다.">
   <label className="section-label">보호받을 가족과의 관계</label><RelationGrid options={contactRelations} value={relation} setValue={setRelation}/><Field label="성함" placeholder="예: 김민지" value={value.name} onChange={name => setValue(v => ({...v,name}))}/><Field label="휴대전화 번호" placeholder="010-0000-0000" type="tel" value={value.phone} onChange={phone => setValue(v => ({...v,phone}))}/>{value.phone && !isValidMobilePhone(value.phone) && <span className="validation-error">올바른 휴대전화 번호를 입력해 주세요.</span>}
   <label className="toggle-row"><span><b>가장 먼저 확인할 가족</b><small>의심전화 발생 시 첫 번째로 알림을 보냅니다.</small></span><input type="checkbox" checked={value.primary} onChange={e => setValue(v => ({...v,primary:e.target.checked}))}/></label>
-  <button className="secondary full" disabled={!valid} onClick={onAdd}><Plus /> 확인 가족 한 명 더 추가</button><button className="primary full" disabled={!valid} onClick={onNext}>다음: 음성·얼굴 등록 요청</button>
+  <button className="secondary full" disabled={busy || !valid} onClick={onAdd}><Plus /> 이 가족 추가하기</button>
+  {contacts.length > 0 && <div className="enrollment-list">{contacts.map((contact) => <div className="enrollment-person" key={contact.id}><span className="person-icon">{contact.name.slice(0, 1)}</span><span><b>{contact.name}</b><small>{contact.phone_number_last4 ? `휴대전화 끝 ${contact.phone_number_last4}` : "확인 가족"}</small></span><button className="delete-family-button" disabled={busy} onClick={() => onDelete(contact)}><Trash2 /> 삭제</button></div>)}</div>}
+  <InfoBox icon={<Shield />}><b>{contacts.length > 0 ? `${contacts.length}명의 확인 가족을 등록했습니다.` : "확인 가족을 한 명 이상 추가해 주세요."}</b><br/>가족 등록을 완료하면 음성·얼굴 등록 안내로 이동합니다.</InfoBox>
+  <button className="primary full" disabled={busy || contacts.length === 0} onClick={onNext}>가족 등록 완료 · 음성·얼굴 등록</button>
 </FormCard>; }
 
 function RegistrationPlan({ contacts, onNext }: { contacts: ConfirmationContactResponse[]; onNext: () => void }) { return <FormCard step="생체정보 등록 안내" title="가족별 등록 항목을 확인해 주세요" description="가족 관계와 전화번호 등록을 마쳤습니다. 음성과 얼굴은 각 가족이 자신의 휴대전화에서 별도로 등록합니다.">
@@ -955,7 +1008,7 @@ function HistoryPage() { return <div className="content-wide"><div className="pa
 function AdminPage() { return <div className="content-wide"><div className="page-heading admin-heading"><div><span className="eyebrow">SoriCall Admin</span><h1>서비스 운영 현황</h1><p>개인정보 원본은 노출하지 않고 운영 상태와 감사 기록만 제공합니다.</p></div><span className="status-pill"><i/> 모든 시스템 정상</span></div><section className="stat-grid admin-stats"><Stat icon={<CircleUserRound/>} value="1,284" label="통화 보호 사용자"/><Stat icon={<Activity/>} value="8,420" label="이번 달 분석 통화"/><Stat icon={<ShieldAlert/>} value="327" label="위험 통화 감지" tone="orange"/><Stat icon={<PhoneOff/>} value="86" label="고위험 차단" tone="red"/></section><section className="admin-grid"><div className="admin-card"><h3>서비스 상태</h3><SystemRow label="업무 API" value="정상"/><SystemRow label="AI 음성 분석" value="정상"/><SystemRow label="가족 알림 FCM" value="지연 2건" warn/><SystemRow label="Android 단말" value="1,118대 연결"/></div><div className="admin-card"><h3>오늘의 위험등급</h3><div className="donut"><span><b>241</b>분석 통화</span></div><div className="legend"><span><i className="green"/>안전 73%</span><span><i className="yellow"/>주의 18%</span><span><i className="red"/>위험 9%</span></div></div><div className="admin-card wide"><h3>최근 운영 알림</h3><CallRow tone="warn" icon={<Bell/>} title="FCM 알림 재시도 2건" meta="5분 전 · 자동 재시도 대기" badge="확인"/><CallRow tone="safe" icon={<Check/>} title="개인정보 자동 파기 완료" meta="오늘 02:00 · 184건" badge="완료"/></div></section></div>; }
 
 function FormCard({ step, title, description, children }: { step?: string; title: string; description: string; children: React.ReactNode }) { return <div className="form-wrap"><div className="form-card">{step && <span className="step">{step}</span>}<h1>{title}</h1><p className="lead">{description}</p><div className="form-content">{children}</div></div></div>; }
-function Field({ label, placeholder, type="text", suffix, value, onChange }: { label: string; placeholder: string; type?: string; suffix?: string; value?:string; onChange?:(value:string)=>void }) { return <label className="field"><span>{label}</span><div><input type={type} placeholder={placeholder} value={value} onChange={e => onChange?.(e.target.value)}/>{suffix && <button type="button">{suffix}</button>}</div></label>; }
+function Field({ label, placeholder, type="text", suffix, autoComplete, value, onChange }: { label: string; placeholder: string; type?: string; suffix?: string; autoComplete?: string; value?:string; onChange?:(value:string)=>void }) { return <label className="field"><span>{label}</span><div><input type={type} autoComplete={autoComplete} placeholder={placeholder} value={value} onChange={e => onChange?.(e.target.value)}/>{suffix && <button type="button">{suffix}</button>}</div></label>; }
 function RelationGrid({ options, value, setValue }: { options: string[]; value: string; setValue: (v:string)=>void }) { return <div className="relation-grid">{options.map(o => <button key={o} className={o===value?"selected":""} onClick={() => setValue(o)}>{o===value && <Check/>}{o}</button>)}</div>; }
 function InfoBox({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) { return <div className="info-box"><span>{icon}</span><p>{children}</p></div>; }
 function Stat({ icon, value, label, tone="teal" }: { icon: React.ReactNode; value: string; label: string; tone?: string }) { return <div className={`stat ${tone}`}><span>{icon}</span><div><b>{value}</b><small>{label}</small></div></div>; }

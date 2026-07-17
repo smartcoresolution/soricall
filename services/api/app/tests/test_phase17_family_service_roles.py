@@ -2,6 +2,7 @@ from app.api.v1.families import (
     create_confirmation_contact,
     create_family,
     create_protected_call_user,
+    delete_confirmation_contact,
     list_confirmation_contacts,
     list_protected_call_users,
 )
@@ -62,4 +63,7 @@ def test_registers_protected_parent_and_simple_confirmation_contacts() -> None:
     assert len(list_protected_call_users(family.id, db)) == 1
     contacts = list_confirmation_contacts(family.id, protected.id, db)
     assert [contact.relation_code for contact in contacts] == ["DAUGHTER", "SON"]
+    delete_confirmation_contact(family.id, protected.id, first.id, db)
+    contacts = list_confirmation_contacts(family.id, protected.id, db)
+    assert [contact.relation_code for contact in contacts] == ["SON"]
     db.close()

@@ -55,12 +55,14 @@ test("부모·조부모가 본인 휴대전화를 직접 보호 대상으로 연
   await page.getByLabel("성함").fill("김아들");
   await page.getByLabel("휴대전화 번호").fill("010-7777-9999");
   const firstContactRequest = page.waitForRequest((request) => request.url().includes("/confirmation-contacts") && request.method() === "POST");
-  await page.getByRole("button", { name: /확인 가족 한 명 더 추가/ }).click();
+  await page.getByRole("button", { name: /이 가족 추가하기/ }).click();
   const contactBody = (await firstContactRequest).postDataJSON();
   await page.getByRole("button", { name: "딸", exact: true }).click();
   await page.getByLabel("성함").fill("김딸");
   await page.getByLabel("휴대전화 번호").fill("010-8888-0000");
-  await page.getByRole("button", { name: "다음: 음성·얼굴 등록 요청" }).click();
+  await page.getByRole("button", { name: /이 가족 추가하기/ }).click();
+  await expect(page.getByText("2명의 확인 가족을 등록했습니다.")).toBeVisible();
+  await page.getByRole("button", { name: "가족 등록 완료 · 음성·얼굴 등록" }).click();
 
   expect(protectedBody).toMatchObject({
     name: "김부모",

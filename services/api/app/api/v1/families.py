@@ -210,6 +210,26 @@ def list_confirmation_contacts(
     )
 
 
+@router.delete(
+    "/{family_id}/protected-call-users/{protected_user_id}/confirmation-contacts/{contact_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_confirmation_contact(
+    family_id: str,
+    protected_user_id: str,
+    contact_id: str,
+    db: DbSession,
+) -> None:
+    protected_user = db.get(Senior, protected_user_id)
+    if not protected_user or protected_user.family_id != family_id:
+        raise HTTPException(status_code=404, detail="protected call user not found")
+    contact = db.get(FamilyMember, contact_id)
+    if not contact or contact.family_id != family_id or contact.member_type != "FAMILY_CONFIRMATION_CONTACT":
+        raise HTTPException(status_code=404, detail="confirmation contact not found")
+    db.delete(contact)
+    db.commit()
+
+
 def _invitation_response(invitation: EnrollmentInvitation, member: FamilyMember, enrollment_url: str | None = None) -> EnrollmentInvitationResponse:
     now = datetime.now(timezone.utc)
     expires_at = invitation.expires_at if invitation.expires_at.tzinfo else invitation.expires_at.replace(tzinfo=timezone.utc)

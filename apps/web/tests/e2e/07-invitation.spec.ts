@@ -23,7 +23,8 @@ test("화면 7: 등록 가족의 개발용 초대 링크를 생성한다", async
   await page.getByRole("button", { name: "손녀", exact: true }).click();
   await page.getByLabel("성함").fill("테스트 손녀");
   await page.getByLabel("휴대전화 번호").fill("010-3333-4444");
-  await page.getByRole("button", { name: "다음: 음성·얼굴 등록 요청" }).click();
+  await page.getByRole("button", { name: /이 가족 추가하기/ }).click();
+  await page.getByRole("button", { name: "가족 등록 완료 · 음성·얼굴 등록" }).click();
   await expect(page.getByRole("heading", { name: "가족별 등록 항목을 확인해 주세요" })).toBeVisible();
   await page.getByRole("button", { name: "다음: 등록 요청 보내기" }).click();
 

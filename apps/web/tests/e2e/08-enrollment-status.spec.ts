@@ -23,7 +23,8 @@ test("화면 8: 가족 등록 상태를 표시하고 링크를 재전송한다",
   await page.getByRole("button", { name: "아들", exact: true }).click();
   await page.getByLabel("성함").fill("테스트 아들");
   await page.getByLabel("휴대전화 번호").fill("010-3333-4444");
-  await page.getByRole("button", { name: "다음: 음성·얼굴 등록 요청" }).click();
+  await page.getByRole("button", { name: /이 가족 추가하기/ }).click();
+  await page.getByRole("button", { name: "가족 등록 완료 · 음성·얼굴 등록" }).click();
   await page.getByRole("button", { name: "다음: 등록 요청 보내기" }).click();
   await page.getByRole("button", { name: /등록 요청 보내기/ }).click();
 
