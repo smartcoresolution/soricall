@@ -20,7 +20,9 @@ test.describe("화면 2: 회원가입", () => {
     await page.getByRole("button", { name: "인증번호 받기" }).click();
     await expect(page.getByLabel("문자 인증번호")).toHaveValue(/^\d{6}$/);
     await page.getByRole("button", { name: "인증 확인" }).click();
-    await expect(page.getByText("휴대전화 인증이 완료됐습니다.", { exact: true })).toBeVisible();
+    await expect(
+      page.locator(".info-box").getByText("휴대전화 인증이 완료됐습니다.", { exact: true }),
+    ).toBeVisible();
     await page.getByLabel("비밀번호 확인").fill("different1");
     await expect(next).toBeDisabled();
 
