@@ -26,7 +26,8 @@ def create_voice_profile(request: VoiceProfileCreate, db: DbSession) -> VoicePro
             consent_id=request.consent_id,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        status_code = 404 if str(exc) == "family member not found" else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
 @router.get("", response_model=list[VoiceProfileResponse])
@@ -62,7 +63,8 @@ def add_voice_sample(profile_id: str, request: VoiceSampleCreate, db: DbSession)
             purpose=request.purpose,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        status_code = 404 if str(exc) == "voice profile not found" else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
     return VoiceSampleResponse.model_validate(sample)
 
 

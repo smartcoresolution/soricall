@@ -5,6 +5,7 @@ from fastapi import HTTPException
 
 from app.api.v1.auth import confirm_phone_verification, login, register, send_phone_verification
 from app.core.database import SessionLocal
+from app.models import Family, Senior
 from app.schemas import (
     LoginRequest,
     PhoneVerificationConfirmRequest,
@@ -55,3 +56,40 @@ def test_registration_rejects_unverified_phone() -> None:
             db,
         )
     assert error.value.detail == "phone verification required"
+
+
+def test_senior_registration_creates_self_protection_context() -> None:
+    db = SessionLocal()
+    phone = f"010{uuid4().int % 100000000:08d}"
+    sent = send_phone_verification(PhoneVerificationSendRequest(phone_number=phone), db)
+    confirmed = confirm_phone_verification(
+        PhoneVerificationConfirmRequest(
+            verification_id=sent.verification_id,
+            code=sent.development_code,
+        ),
+        db,
+    )
+    auth = register(
+        RegisterRequest(
+            phone_number=phone,
+            verification_token=confirmed.verification_token,
+            password="password123",
+            display_name="어르신 사용자",
+            role="SENIOR",
+        ),
+        db,
+    )
+
+    assert auth.family_id is not None
+    assert auth.senior_id is not None
+    family = db.get(Family, auth.family_id)
+    senior = db.get(Senior, auth.senior_id)
+    assert family is not None
+    assert family.created_by == auth.user.id
+    assert senior is not None
+    assert senior.family_id == family.id
+    assert senior.user_id == auth.user.id
+    assert senior.relation_code == "SELF"
+    assert senior.phone_number_last4 == phone[-4:]
+    assert login(LoginRequest(phone_number=phone, password="password123"), db).senior_id == senior.id
+    db.close()

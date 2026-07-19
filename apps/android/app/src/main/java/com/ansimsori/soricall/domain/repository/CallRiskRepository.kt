@@ -2,14 +2,28 @@ package com.ansimsori.soricall.domain.repository
 
 import com.ansimsori.soricall.domain.model.CallRisk
 import com.ansimsori.soricall.domain.model.RiskLevel
+import java.security.MessageDigest
 
-class CallRiskRepository {
+class CallRiskRepository(
+    private val familyNumberHashes: Set<String> = emptySet(),
+    private val riskNumberHashes: Set<String> = emptySet(),
+) {
     fun evaluateIncomingNumber(phoneNumber: String): CallRisk {
-        val digits = phoneNumber.filter { it.isDigit() }
-        val last4 = digits.takeLast(4)
+        val normalized = phoneNumber.filter { it.isDigit() || it == '+' }
+        val numberHash = MessageDigest.getInstance("SHA-256")
+            .digest("phone-number:$normalized".toByteArray())
+            .joinToString("") { "%02x".format(it) }
 
         return when {
-            last4 in setOf("7777", "0000") -> CallRisk(
+            numberHash in familyNumberHashes -> CallRisk(
+                score = 10,
+                level = RiskLevel.LOW,
+                shouldBlock = false,
+                shouldReject = false,
+                shouldSilence = false,
+                reasonCodes = emptyList(),
+            )
+            numberHash in riskNumberHashes -> CallRisk(
                 score = 90,
                 level = RiskLevel.CRITICAL,
                 shouldBlock = false,
@@ -17,7 +31,7 @@ class CallRiskRepository {
                 shouldSilence = true,
                 reasonCodes = listOf("RISK_NUMBER_MATCH"),
             )
-            last4.isBlank() -> CallRisk(
+            normalized.isBlank() -> CallRisk(
                 score = 45,
                 level = RiskLevel.CAUTION,
                 shouldBlock = false,
@@ -27,13 +41,12 @@ class CallRiskRepository {
             )
             else -> CallRisk(
                 score = 30,
-                level = RiskLevel.LOW,
+                level = RiskLevel.CAUTION,
                 shouldBlock = false,
                 shouldReject = false,
                 shouldSilence = false,
-                reasonCodes = emptyList(),
+                reasonCodes = listOf("UNKNOWN_NUMBER"),
             )
         }
     }
 }
-

@@ -1,4 +1,3 @@
-from app.api.v1.auth import register
 from app.api.v1.call_sessions import create_call_session, register_push_token
 from app.api.v1.families import create_family
 from app.api.v1.seniors import add_guardian, create_senior
@@ -9,9 +8,9 @@ from app.schemas import (
     FamilyCreate,
     GuardianCreate,
     PushTokenRegister,
-    RegisterRequest,
     SeniorCreate,
 )
+from app.tests.factories import register_test_user
 from app.services.family_confirmation_service import FamilyConfirmationService
 from app.services.fcm_service import PushResult
 
@@ -29,15 +28,7 @@ def setup_function() -> None:
 
 def test_family_confirmation_sends_and_records_push() -> None:
     db = SessionLocal()
-    user = register(
-        RegisterRequest(
-            email="push@example.com",
-            password="password123",
-            display_name="보호자",
-            role="GUARDIAN",
-        ),
-        db,
-    ).user
+    user = register_test_user(db, display_name="보호자").user
     family = create_family(FamilyCreate(name="푸시 가족"), db)
     senior = create_senior(SeniorCreate(family_id=family.id, name="어르신"), db)
     guardian = add_guardian(senior.id, GuardianCreate(user_id=user.id), db)

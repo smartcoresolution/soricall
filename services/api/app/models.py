@@ -114,6 +114,11 @@ class FamilyMember(Base):
 
     id: Mapped[str] = mapped_column(GUID(), primary_key=True, default=new_uuid)
     family_id: Mapped[str] = mapped_column(GUID(), ForeignKey("families.id", ondelete="CASCADE"))
+    protected_user_id: Mapped[str | None] = mapped_column(
+        GUID(),
+        ForeignKey("seniors.id", ondelete="CASCADE"),
+        index=True,
+    )
     user_id: Mapped[str | None] = mapped_column(GUID(), ForeignKey("users.id"))
     name: Mapped[str] = mapped_column(String(100))
     relation: Mapped[str | None] = mapped_column(String(50))
@@ -126,6 +131,12 @@ class FamilyMember(Base):
     phone_number_hash: Mapped[str | None] = mapped_column(Text)
     phone_number_last4: Mapped[str | None] = mapped_column(String(4))
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    approval_status: Mapped[str] = mapped_column(String(30), default="DRAFT")
+    trust_level: Mapped[str] = mapped_column(String(1), default="D")
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    approved_by: Mapped[str | None] = mapped_column(GUID(), ForeignKey("users.id"))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revocation_reason: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -136,11 +147,34 @@ class EnrollmentInvitation(Base):
     family_id: Mapped[str] = mapped_column(GUID(), ForeignKey("families.id", ondelete="CASCADE"), index=True)
     family_member_id: Mapped[str] = mapped_column(GUID(), ForeignKey("family_members.id", ondelete="CASCADE"), index=True)
     channel: Mapped[str] = mapped_column(String(20), default="SMS")
+    requested_assets: Mapped[str] = mapped_column(String(100), default="VOICE,FACE")
     status: Mapped[str] = mapped_column(String(30), default="PENDING")
     token_hash: Mapped[str] = mapped_column(Text, unique=True, index=True)
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    phone_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class MediaImportSession(Base):
+    __tablename__ = "media_import_sessions"
+
+    id: Mapped[str] = mapped_column(GUID(), primary_key=True, default=new_uuid)
+    family_id: Mapped[str] = mapped_column(GUID(), ForeignKey("families.id", ondelete="CASCADE"), index=True)
+    family_member_id: Mapped[str] = mapped_column(GUID(), ForeignKey("family_members.id", ondelete="CASCADE"), index=True)
+    source: Mapped[str] = mapped_column(String(30), default="EXTERNAL_SHARE")
+    filename: Mapped[str] = mapped_column(String(255))
+    declared_mime_type: Mapped[str] = mapped_column(String(100))
+    detected_mime_type: Mapped[str | None] = mapped_column(String(100))
+    content_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+    size_bytes: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(30), default="PENDING_UPLOAD")
+    trust_level: Mapped[str] = mapped_column(String(1), default="D")
+    failure_code: Mapped[str | None] = mapped_column(String(50))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -218,6 +252,10 @@ class VoiceSample(Base):
     mime_type: Mapped[str | None] = mapped_column(String(100))
     purpose: Mapped[str] = mapped_column(String(30))
     retained: Mapped[bool] = mapped_column(Boolean, default=False)
+    content_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+    size_bytes: Mapped[int | None] = mapped_column(Integer)
+    validation_status: Mapped[str] = mapped_column(String(30), default="VALIDATED")
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -234,6 +272,11 @@ class FaceProfile(Base):
     status: Mapped[str] = mapped_column(String(30), default="ACTIVE")
     consent_accepted: Mapped[bool] = mapped_column(Boolean, default=False)
     match_score: Mapped[int | None] = mapped_column(Integer)
+    content_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+    size_bytes: Mapped[int | None] = mapped_column(Integer)
+    validation_status: Mapped[str] = mapped_column(String(30), default="VALIDATED")
+    consented_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

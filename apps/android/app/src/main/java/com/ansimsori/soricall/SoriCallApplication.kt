@@ -4,8 +4,13 @@ import android.app.Application
 import com.ansimsori.soricall.core.network.HttpSoriCallApi
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 class SoriCallApplication : Application() {
+    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val preferences by lazy {
         val masterKey = MasterKey.Builder(this).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
         EncryptedSharedPreferences.create(
@@ -27,11 +32,56 @@ class SoriCallApplication : Application() {
         preferences.edit().putString("device_enrollment_token", token).apply()
     }
 
+    fun savePendingSharedMedia(uri: String, mimeType: String?) {
+        preferences.edit()
+            .putString("pending_shared_media_uri", uri)
+            .putString("pending_shared_media_mime", mimeType)
+            .apply()
+    }
+
     fun accessToken(): String? = preferences.getString("access_token", null)
     fun currentUserId(): String? = preferences.getString("user_id", null)
+    fun screeningFamilyHashes(): Set<String> =
+        preferences.getStringSet("screening_family_hashes", emptySet()) ?: emptySet()
+    fun screeningRiskHashes(): Set<String> =
+        preferences.getStringSet("screening_risk_hashes", emptySet()) ?: emptySet()
 
-    fun saveAuth(accessToken: String, refreshToken: String, userId: String) {
-        preferences.edit().putString("access_token", accessToken).putString("refresh_token", refreshToken).putString("user_id", userId).apply()
+    suspend fun refreshScreeningCache(seniorId: String) {
+        val cache = api.getScreeningCache(seniorId)
+        preferences.edit()
+            .putStringSet("screening_family_hashes", cache.familyNumberHashes)
+            .putStringSet("screening_risk_hashes", cache.riskNumberHashes)
+            .putString("screening_cache_version", cache.version)
+            .putLong("screening_cache_updated_at", System.currentTimeMillis())
+            .apply()
+    }
+
+    fun recordScreeningDecision(source: String, elapsedMs: Long) {
+        preferences.edit()
+            .putString("last_screening_source", source)
+            .putLong("last_screening_elapsed_ms", elapsedMs)
+            .putLong("last_screening_at", System.currentTimeMillis())
+            .apply()
+    }
+
+    fun registerPushToken(token: String) {
+        preferences.edit().putString("fcm_token", token).apply()
+        if (accessToken().isNullOrBlank()) return
+        applicationScope.launch {
+            runCatching { api.registerPushToken(token) }
+        }
+    }
+
+    fun saveAuth(accessToken: String, refreshToken: String, userId: String, seniorId: String? = null) {
+        preferences.edit()
+            .putString("access_token", accessToken)
+            .putString("refresh_token", refreshToken)
+            .putString("user_id", userId)
+            .apply {
+                if (seniorId != null) putString("senior_id", seniorId)
+            }
+            .apply()
+        preferences.getString("fcm_token", null)?.let(::registerPushToken)
     }
 
     fun saveConnection(seniorId: String, accessToken: String) {

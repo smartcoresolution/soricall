@@ -1,6 +1,7 @@
 from sqlalchemy import inspect
 
 from app.core.database import Base, engine
+from app.models import ResponseAction, RiskDecision
 
 
 def setup_function() -> None:
@@ -20,15 +21,13 @@ def test_patent_call_flow_tables_are_created() -> None:
 
 
 def test_patent_call_flow_foreign_keys_are_declared() -> None:
-    inspector = inspect(engine)
-
     decision_targets = {
-        foreign_key["referred_table"]
-        for foreign_key in inspector.get_foreign_keys("risk_decisions")
+        foreign_key.column.table.name
+        for foreign_key in RiskDecision.__table__.foreign_keys
     }
     action_targets = {
-        foreign_key["referred_table"]
-        for foreign_key in inspector.get_foreign_keys("response_actions")
+        foreign_key.column.table.name
+        for foreign_key in ResponseAction.__table__.foreign_keys
     }
 
     assert decision_targets == {"call_sessions", "voice_profiles"}

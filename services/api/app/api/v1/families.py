@@ -6,8 +6,9 @@ from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import or_, select
 
 from app.api.deps import DbSession
-from app.core.security import hash_phone_number, phone_last4
-from app.models import EnrollmentInvitation, FaceProfile, Family, FamilyMember, Guardian, SafeWord, Senior
+from app.core.config import get_settings
+from app.core.security import hash_phone_number, hash_verification_code, normalize_phone_number, phone_last4
+from app.models import AuditLog, EnrollmentInvitation, FaceProfile, Family, FamilyMember, Guardian, PhoneVerification, SafeWord, Senior
 from app.schemas import (
     FamilyCreate,
     FamilyMemberCreate,
@@ -19,6 +20,9 @@ from app.schemas import (
     ConfirmationContactResponse,
     EnrollmentInvitationResponse,
     EnrollmentCompleteRequest,
+    DeviceVerificationConfirmRequest,
+    DeviceVerificationRequest,
+    PhoneVerificationSendResponse,
     SafeWordResponse,
     SafeWordUpsert,
     SafeWordVerifyRequest,
@@ -169,6 +173,7 @@ def create_confirmation_contact(
         raise HTTPException(status_code=404, detail="protected call user not found")
     contact = FamilyMember(
         family_id=family_id,
+        protected_user_id=protected_user_id,
         user_id=request.user_id,
         name=request.name,
         relation=request.relation_code,
@@ -203,6 +208,7 @@ def list_confirmation_contacts(
             select(FamilyMember)
             .where(
                 FamilyMember.family_id == family_id,
+                FamilyMember.protected_user_id == protected_user_id,
                 FamilyMember.member_type == "FAMILY_CONFIRMATION_CONTACT",
             )
             .order_by(FamilyMember.notification_priority, FamilyMember.created_at)
@@ -224,7 +230,12 @@ def delete_confirmation_contact(
     if not protected_user or protected_user.family_id != family_id:
         raise HTTPException(status_code=404, detail="protected call user not found")
     contact = db.get(FamilyMember, contact_id)
-    if not contact or contact.family_id != family_id or contact.member_type != "FAMILY_CONFIRMATION_CONTACT":
+    if (
+        not contact
+        or contact.family_id != family_id
+        or contact.protected_user_id != protected_user_id
+        or contact.member_type != "FAMILY_CONFIRMATION_CONTACT"
+    ):
         raise HTTPException(status_code=404, detail="confirmation contact not found")
     db.delete(contact)
     db.commit()
@@ -242,30 +253,43 @@ def _invitation_response(invitation: EnrollmentInvitation, member: FamilyMember,
         relation_code=member.relation_code,
         phone_number_last4=member.phone_number_last4,
         channel=invitation.channel,
+        requested_assets=[asset for asset in invitation.requested_assets.split(",") if asset],
         status=invitation_status,
         sent_at=invitation.sent_at.isoformat(),
         expires_at=invitation.expires_at.isoformat(),
         enrollment_url=enrollment_url,
+        member_approval_status=member.approval_status,
+        member_trust_level=member.trust_level,
+        phone_verified=invitation.phone_verified_at is not None,
     )
 
 
 @router.post("/{family_id}/members/{member_id}/enrollment-invitations", response_model=EnrollmentInvitationResponse, status_code=201)
-def create_enrollment_invitation(family_id: str, member_id: str, db: DbSession) -> EnrollmentInvitationResponse:
+def create_enrollment_invitation(
+    family_id: str,
+    member_id: str,
+    db: DbSession,
+    channel: str = "LINK",
+) -> EnrollmentInvitationResponse:
     member = db.get(FamilyMember, member_id)
     if not member or member.family_id != family_id:
         raise HTTPException(status_code=404, detail="family member not found")
     token = secrets.token_urlsafe(32)
+    if channel not in {"LINK", "QR", "DIRECT"}:
+        raise HTTPException(status_code=400, detail="unsupported enrollment channel")
     delivery = get_enrollment_delivery_provider().prepare(token)
     now = datetime.now(timezone.utc)
     invitation = EnrollmentInvitation(
         family_id=family_id,
         family_member_id=member_id,
-        channel=delivery.channel,
+        channel=delivery.channel if channel == "LINK" else channel,
         status="PENDING",
         token_hash=hashlib.sha256(token.encode()).hexdigest(),
         sent_at=now,
-        expires_at=now + timedelta(days=3),
+        expires_at=now + (timedelta(minutes=5) if channel == "QR" else timedelta(days=3)),
     )
+    member.approval_status = "INVITED"
+    member.is_verified = False
     db.add(invitation)
     db.commit()
     db.refresh(invitation)
@@ -295,6 +319,10 @@ def resend_enrollment_invitation(family_id: str, invitation_id: str, db: DbSessi
     invitation.status = "PENDING"
     invitation.sent_at = now
     invitation.expires_at = now + timedelta(days=3)
+    invitation.phone_verified_at = None
+    invitation.used_at = None
+    member.approval_status = "INVITED"
+    member.is_verified = False
     db.commit()
     db.refresh(invitation)
     return _invitation_response(invitation, member, delivery.enrollment_url)
@@ -321,6 +349,70 @@ def resolve_enrollment_invitation(token: str, db: DbSession) -> EnrollmentInvita
     return _invitation_response(invitation, member)
 
 
+@enrollment_router.post(
+    "/phone-verification",
+    response_model=PhoneVerificationSendResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def send_enrollment_phone_verification(
+    token: str,
+    request: DeviceVerificationRequest,
+    db: DbSession,
+) -> PhoneVerificationSendResponse:
+    invitation, member = _invitation_for_token(token, db)
+    if invitation.status == "EXPIRED":
+        raise HTTPException(status_code=410, detail="invitation expired")
+    if hash_phone_number(request.phone_number) != member.phone_number_hash:
+        raise HTTPException(status_code=400, detail="phone number does not match invited family member")
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    verification = PhoneVerification(
+        phone_number=normalize_phone_number(request.phone_number),
+        code_hash="pending",
+        purpose=f"ENROLLMENT_INVITE:{invitation.id}",
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+    )
+    db.add(verification)
+    db.flush()
+    verification.code_hash = hash_verification_code(verification.id, code)
+    db.commit()
+    return PhoneVerificationSendResponse(
+        verification_id=verification.id,
+        expires_in=300,
+        development_code=code if get_settings().app_env != "production" else None,
+    )
+
+
+@enrollment_router.post("/phone-verification/confirm", response_model=EnrollmentInvitationResponse)
+def confirm_enrollment_phone_verification(
+    token: str,
+    request: DeviceVerificationConfirmRequest,
+    db: DbSession,
+) -> EnrollmentInvitationResponse:
+    invitation, member = _invitation_for_token(token, db)
+    verification = db.get(PhoneVerification, request.verification_id)
+    now = datetime.now(timezone.utc)
+    if not verification or verification.purpose != f"ENROLLMENT_INVITE:{invitation.id}":
+        raise HTTPException(status_code=404, detail="phone verification not found")
+    expires_at = verification.expires_at if verification.expires_at.tzinfo else verification.expires_at.replace(tzinfo=timezone.utc)
+    if verification.consumed_at or expires_at <= now:
+        raise HTTPException(status_code=400, detail="phone verification expired")
+    verification.attempts += 1
+    if verification.attempts > 5:
+        db.commit()
+        raise HTTPException(status_code=429, detail="phone verification attempts exceeded")
+    if not secrets.compare_digest(
+        verification.code_hash,
+        hash_verification_code(verification.id, request.code),
+    ):
+        db.commit()
+        raise HTTPException(status_code=400, detail="invalid phone verification code")
+    verification.consumed_at = now
+    invitation.phone_verified_at = now
+    db.commit()
+    db.refresh(invitation)
+    return _invitation_response(invitation, member)
+
+
 @enrollment_router.post("/complete", response_model=EnrollmentInvitationResponse)
 def complete_enrollment_invitation(
     token: str,
@@ -331,11 +423,32 @@ def complete_enrollment_invitation(
     if invitation.status == "EXPIRED":
         raise HTTPException(status_code=410, detail="invitation expired")
     if invitation.status == "COMPLETED":
+        if invitation.channel == "QR":
+            db.add(AuditLog(
+                actor_user_id=current_user_id.get(),
+                action="QR_REPLAY_REJECTED",
+                resource_type="ENROLLMENT_INVITATION",
+                resource_id=invitation.id,
+                metadata_json='{"reason":"consumed QR invitation presented again"}',
+            ))
+            db.commit()
+            raise HTTPException(status_code=409, detail="QR invitation already used")
         return _invitation_response(invitation, member)
+    if not invitation.phone_verified_at:
+        raise HTTPException(status_code=400, detail="invited family phone verification required")
     if not request.consent_accepted:
         raise HTTPException(status_code=400, detail="consent required")
 
     voice_service = VoiceProfileService(db)
+    try:
+        voice_service.validate_sample(
+            audio_ref=request.audio_ref,
+            duration_ms=request.duration_ms,
+            mime_type=request.mime_type,
+            purpose="ENROLLMENT",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     profile = voice_service.create_profile(
         family_member_id=member.id,
         display_name=member.name,
@@ -352,19 +465,141 @@ def complete_enrollment_invitation(
     )
     voice_service.enroll(voice_profile_id=profile.id, audio_ref=request.audio_ref)
     if request.face_image_ref:
+        from app.api.v1.face_video import _validate_face_image
+        from app.core.config import get_settings
+
+        try:
+            content_hash, size_bytes, validation_status = _validate_face_image(request.face_image_ref)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         db.add(FaceProfile(
             family_member_id=member.id,
             display_name=member.name,
-            image_ref=request.face_image_ref,
+            image_ref=request.face_image_ref if (
+                validation_status == "DEVELOPMENT_REFERENCE" or get_settings().retain_face_images
+            ) else None,
             consent_accepted=True,
             status="ACTIVE",
+            content_hash=content_hash,
+            size_bytes=size_bytes,
+            validation_status=validation_status,
+            consented_at=datetime.now(timezone.utc),
         ))
     invitation.status = "COMPLETED"
+    invitation.used_at = datetime.now(timezone.utc)
     invitation.completed_at = datetime.now(timezone.utc)
-    member.is_verified = True
+    member.approval_status = "REVIEW_REQUIRED"
+    member.trust_level = "B"
+    member.is_verified = False
     db.commit()
     db.refresh(invitation)
     return _invitation_response(invitation, member)
+
+
+def _confirmation_contact_for_transition(
+    family_id: str,
+    protected_user_id: str,
+    contact_id: str,
+    db: DbSession,
+) -> FamilyMember:
+    protected_user = db.get(Senior, protected_user_id)
+    if not protected_user or protected_user.family_id != family_id:
+        raise HTTPException(status_code=404, detail="protected call user not found")
+    actor_id = current_user_id.get()
+    if actor_id and protected_user.user_id != actor_id:
+        raise HTTPException(status_code=403, detail="protected user approval required")
+    contact = db.get(FamilyMember, contact_id)
+    if (
+        not contact
+        or contact.family_id != family_id
+        or contact.protected_user_id != protected_user_id
+        or contact.member_type != "FAMILY_CONFIRMATION_CONTACT"
+    ):
+        raise HTTPException(status_code=404, detail="confirmation contact not found")
+    return contact
+
+
+def _audit_member_transition(db: DbSession, member: FamilyMember, action: str) -> None:
+    db.add(
+        AuditLog(
+            actor_user_id=current_user_id.get(),
+            action=action,
+            resource_type="FAMILY_MEMBER",
+            resource_id=member.id,
+            metadata_json=f'{{"approval_status":"{member.approval_status}","trust_level":"{member.trust_level}"}}',
+        )
+    )
+
+
+@router.post(
+    "/{family_id}/protected-call-users/{protected_user_id}/confirmation-contacts/{contact_id}/approve",
+    response_model=ConfirmationContactResponse,
+)
+def approve_confirmation_contact(
+    family_id: str,
+    protected_user_id: str,
+    contact_id: str,
+    db: DbSession,
+) -> FamilyMember:
+    contact = _confirmation_contact_for_transition(family_id, protected_user_id, contact_id, db)
+    if contact.approval_status != "REVIEW_REQUIRED":
+        raise HTTPException(status_code=409, detail="confirmation contact is not ready for approval")
+    now = datetime.now(timezone.utc)
+    contact.approval_status = "ACTIVE"
+    contact.is_verified = True
+    contact.approved_at = now
+    contact.approved_by = current_user_id.get()
+    contact.revoked_at = None
+    contact.revocation_reason = None
+    _audit_member_transition(db, contact, "FAMILY_MEMBER_APPROVED")
+    db.commit()
+    db.refresh(contact)
+    return contact
+
+
+@router.post(
+    "/{family_id}/protected-call-users/{protected_user_id}/confirmation-contacts/{contact_id}/reverify",
+    response_model=ConfirmationContactResponse,
+)
+def reverify_confirmation_contact(
+    family_id: str,
+    protected_user_id: str,
+    contact_id: str,
+    db: DbSession,
+) -> FamilyMember:
+    contact = _confirmation_contact_for_transition(family_id, protected_user_id, contact_id, db)
+    if contact.approval_status != "ACTIVE":
+        raise HTTPException(status_code=409, detail="only active confirmation contacts can be reverified")
+    contact.approval_status = "REVERIFY"
+    contact.is_verified = False
+    _audit_member_transition(db, contact, "FAMILY_MEMBER_REVERIFY_REQUESTED")
+    db.commit()
+    db.refresh(contact)
+    return contact
+
+
+@router.post(
+    "/{family_id}/protected-call-users/{protected_user_id}/confirmation-contacts/{contact_id}/revoke",
+    response_model=ConfirmationContactResponse,
+)
+def revoke_confirmation_contact(
+    family_id: str,
+    protected_user_id: str,
+    contact_id: str,
+    db: DbSession,
+    reason: str | None = None,
+) -> FamilyMember:
+    contact = _confirmation_contact_for_transition(family_id, protected_user_id, contact_id, db)
+    if contact.approval_status == "REVOKED":
+        return contact
+    contact.approval_status = "REVOKED"
+    contact.is_verified = False
+    contact.revoked_at = datetime.now(timezone.utc)
+    contact.revocation_reason = reason
+    _audit_member_transition(db, contact, "FAMILY_MEMBER_REVOKED")
+    db.commit()
+    db.refresh(contact)
+    return contact
 
 
 @router.post("/{family_id}/safe-word", response_model=SafeWordResponse, status_code=201)

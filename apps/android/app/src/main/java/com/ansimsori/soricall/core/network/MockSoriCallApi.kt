@@ -14,6 +14,12 @@ class MockSoriCallApi : SoriCallApiContract {
     override suspend fun completeDeviceEnrollment(token: String) = DeviceEnrollmentDto("mock-enrollment", "mock-protected-user", "부모님", "1234", "ACTIVE")
 
     override suspend fun validateSenior(seniorId: String) = seniorId.isNotBlank()
+    override suspend fun getScreeningCache(seniorId: String) = ScreeningCacheDto(
+        version = "mock-v1",
+        familyNumberHashes = emptySet(),
+        riskNumberHashes = emptySet(),
+    )
+    override suspend fun registerPushToken(token: String) = Unit
 
     override suspend fun createCallSession(seniorId: String, phoneNumber: String) =
         CallSessionResponseDto("mock-session", "mock-action", 20, "LOW", "VERIFY", listOf("UNKNOWN_NUMBER"))

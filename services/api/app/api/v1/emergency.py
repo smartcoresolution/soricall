@@ -49,7 +49,13 @@ def confirm_family_call(
     return EmergencyNotifyResponse(
         emergency_event_id=risk_event_id,
         notified_guardians=len(notifications),
-        status="SENT" if notifications else "NO_GUARDIANS",
+        status=(
+            "SENT"
+            if notifications and all(item.status == "SENT" for item in notifications)
+            else "FAILED"
+            if notifications
+            else "NO_GUARDIANS"
+        ),
     )
 
 
@@ -66,7 +72,13 @@ def notify_guardians(request: EmergencyNotifyRequest, db: DbSession) -> Emergenc
     return EmergencyNotifyResponse(
         emergency_event_id=request.risk_event_id,
         notified_guardians=len(notifications),
-        status="SENT" if notifications else "NO_GUARDIANS",
+        status=(
+            "SENT"
+            if notifications and all(item.status == "SENT" for item in notifications)
+            else "FAILED"
+            if notifications
+            else "NO_GUARDIANS"
+        ),
     )
 
 
@@ -99,4 +111,3 @@ def list_notifications(
     if risk_event_id:
         statement = statement.where(EmergencyNotification.risk_event_id == risk_event_id)
     return list(db.scalars(statement))
-

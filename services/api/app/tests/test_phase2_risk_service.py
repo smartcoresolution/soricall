@@ -3,7 +3,7 @@ from datetime import datetime
 from app.api.v1.admin import create_risk_number
 from app.api.v1.calls import evaluate_call
 from app.api.v1.families import add_family_member, create_family
-from app.api.v1.seniors import create_senior
+from app.api.v1.seniors import create_senior, get_screening_cache
 from app.core.database import Base, SessionLocal, engine
 from app.models import RiskEvent
 from app.schemas import (
@@ -97,3 +97,32 @@ def test_family_number_stays_low_even_at_night() -> None:
 
     db.close()
 
+
+def test_screening_cache_contains_only_active_family_and_risk_numbers() -> None:
+    db = SessionLocal()
+    family = create_family(FamilyCreate(name="선별 캐시 가족"), db)
+    active = add_family_member(
+        family.id,
+        FamilyMemberCreate(name="승인 가족", relation="SON", phone_number="+821012345678"),
+        db,
+    )
+    add_family_member(
+        family.id,
+        FamilyMemberCreate(name="미승인 가족", relation="DAUGHTER", phone_number="+821087654321"),
+        db,
+    )
+    active.approval_status = "ACTIVE"
+    senior = create_senior(SeniorCreate(family_id=family.id, name="어르신"), db)
+    risk = create_risk_number(
+        RiskNumberCreate(phone_number="+821066660000", label="위험번호", risk_score=90),
+        db,
+    )
+    db.commit()
+
+    cache = get_screening_cache(senior.id, db)
+
+    assert active.phone_number_hash in cache.family_number_hashes
+    assert len(cache.family_number_hashes) == 1
+    assert risk.phone_number_hash in cache.risk_number_hashes
+    assert cache.version
+    db.close()

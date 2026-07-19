@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.os.Build
+import android.os.SystemClock
 import android.telecom.CallScreeningService
 import android.telecom.CallScreeningService.CallResponse
 import com.ansimsori.soricall.domain.repository.CallRiskRepository
@@ -19,7 +20,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
 class SoriCallScreeningService : CallScreeningService() {
-    private val callRiskRepository = CallRiskRepository()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     override fun onDestroy() {
@@ -28,6 +28,7 @@ class SoriCallScreeningService : CallScreeningService() {
     }
 
     override fun onScreenCall(callDetails: Call.Details) {
+        val startedAt = SystemClock.elapsedRealtime()
         val phoneNumber = callDetails.handle?.schemeSpecificPart
         if (phoneNumber.isNullOrBlank()) {
             respondToCall(callDetails, allowCallResponse())
@@ -35,9 +36,18 @@ class SoriCallScreeningService : CallScreeningService() {
         }
 
         val application = applicationContext as SoriCallApplication
+        val callRiskRepository = CallRiskRepository(
+            application.screeningFamilyHashes(),
+            application.screeningRiskHashes(),
+        )
         val seniorId = application.configuredSeniorId()
         if (seniorId == null) {
-            respondToCall(callDetails, responseFor(callRiskRepository.evaluateIncomingNumber(phoneNumber)))
+            val risk = callRiskRepository.evaluateIncomingNumber(phoneNumber)
+            respondToCall(callDetails, responseFor(risk))
+            application.recordScreeningDecision("LOCAL_NO_SENIOR", SystemClock.elapsedRealtime() - startedAt)
+            if (risk.level != com.ansimsori.soricall.domain.model.RiskLevel.LOW) {
+                showWarning(risk.level.name)
+            }
             return
         }
         scope.launch {
@@ -45,7 +55,12 @@ class SoriCallScreeningService : CallScreeningService() {
                 runCatching { application.api.createCallSession(seniorId, phoneNumber) }.getOrNull()
             }
             if (serverResult == null) {
-                respondToCall(callDetails, responseFor(callRiskRepository.evaluateIncomingNumber(phoneNumber)))
+                val risk = callRiskRepository.evaluateIncomingNumber(phoneNumber)
+                respondToCall(callDetails, responseFor(risk))
+                application.recordScreeningDecision("LOCAL_FALLBACK", SystemClock.elapsedRealtime() - startedAt)
+                if (risk.level != com.ansimsori.soricall.domain.model.RiskLevel.LOW) {
+                    showWarning(risk.level.name)
+                }
                 return@launch
             }
             val block = serverResult.decision == "BLOCK"
@@ -58,6 +73,7 @@ class SoriCallScreeningService : CallScreeningService() {
                 .setSkipNotification(false)
                 .build()
             respondToCall(callDetails, response)
+            application.recordScreeningDecision("SERVER", SystemClock.elapsedRealtime() - startedAt)
             if (serverResult.decision != "ALLOW") showWarning(serverResult.riskLevel)
             runCatching {
                 application.api.reportActionResult(serverResult.callSessionId, serverResult.responseActionId, "EXECUTED")

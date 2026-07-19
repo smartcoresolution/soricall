@@ -7,14 +7,22 @@ from fastapi import HTTPException
 from app.api.v1.families import (
     add_family_member,
     complete_enrollment_invitation,
+    confirm_enrollment_phone_verification,
     create_enrollment_invitation,
     create_family,
     resend_enrollment_invitation,
     resolve_enrollment_invitation,
+    send_enrollment_phone_verification,
 )
 from app.core.database import Base, SessionLocal, engine
 from app.models import EnrollmentInvitation, FaceProfile, FamilyMember, VoiceProfile
-from app.schemas import EnrollmentCompleteRequest, FamilyCreate, FamilyMemberCreate
+from app.schemas import (
+    DeviceVerificationConfirmRequest,
+    DeviceVerificationRequest,
+    EnrollmentCompleteRequest,
+    FamilyCreate,
+    FamilyMemberCreate,
+)
 
 
 def setup_function() -> None:
@@ -38,6 +46,24 @@ def _invitation() -> tuple[str, str, str]:
     return result
 
 
+def _verify_invited_phone(token: str, db) -> None:
+    sent = send_enrollment_phone_verification(
+        token,
+        DeviceVerificationRequest(phone_number="01012345678"),
+        db,
+    )
+    assert sent.development_code is not None
+    confirmed = confirm_enrollment_phone_verification(
+        token,
+        DeviceVerificationConfirmRequest(
+            verification_id=sent.verification_id,
+            code=sent.development_code,
+        ),
+        db,
+    )
+    assert confirmed.phone_verified is True
+
+
 def test_token_resolves_and_completion_is_persisted() -> None:
     token, invitation_id, member_id = _invitation()
     db = SessionLocal()
@@ -45,12 +71,14 @@ def test_token_resolves_and_completion_is_persisted() -> None:
     resolved = resolve_enrollment_invitation(token, db)
     assert resolved.family_member_name == "초대받은 딸"
     assert resolved.status == "PENDING"
+    assert resolved.phone_verified is False
+    _verify_invited_phone(token, db)
 
     completed = complete_enrollment_invitation(
         token,
         EnrollmentCompleteRequest(
             audio_ref="data:audio/webm;base64,dGVzdA==",
-            duration_ms=2500,
+            duration_ms=15000,
             face_image_ref="dev-local://face.jpg",
             consent_accepted=True,
         ),
@@ -60,7 +88,10 @@ def test_token_resolves_and_completion_is_persisted() -> None:
     assert completed.status == "COMPLETED"
     stored = db.get(EnrollmentInvitation, invitation_id)
     assert stored is not None and stored.completed_at is not None
-    assert db.get(FamilyMember, member_id).is_verified is True
+    member = db.get(FamilyMember, member_id)
+    assert member.is_verified is False
+    assert member.approval_status == "REVIEW_REQUIRED"
+    assert member.trust_level == "B"
     assert db.query(VoiceProfile).filter_by(family_member_id=member_id, status="ENROLLED").count() == 1
     assert db.query(FaceProfile).filter_by(family_member_id=member_id, status="ACTIVE").count() == 1
     db.close()
@@ -110,11 +141,37 @@ def test_completing_same_invitation_twice_does_not_duplicate_profiles() -> None:
     db = SessionLocal()
     request = EnrollmentCompleteRequest(
         audio_ref="sample.wav",
-        duration_ms=1000,
+        duration_ms=15000,
         consent_accepted=True,
     )
+    _verify_invited_phone(token, db)
 
     assert complete_enrollment_invitation(token, request, db).status == "COMPLETED"
     assert complete_enrollment_invitation(token, request, db).status == "COMPLETED"
     assert db.query(VoiceProfile).filter_by(family_member_id=member_id).count() == 1
+    db.close()
+
+
+def test_invited_family_phone_must_match_before_completion() -> None:
+    token, _, _ = _invitation()
+    db = SessionLocal()
+    with pytest.raises(HTTPException) as mismatch:
+        send_enrollment_phone_verification(
+            token,
+            DeviceVerificationRequest(phone_number="01099999999"),
+            db,
+        )
+    assert mismatch.value.status_code == 400
+
+    with pytest.raises(HTTPException) as not_verified:
+        complete_enrollment_invitation(
+            token,
+            EnrollmentCompleteRequest(
+                audio_ref="sample.wav",
+                duration_ms=1000,
+                consent_accepted=True,
+            ),
+            db,
+        )
+    assert not_verified.value.detail == "invited family phone verification required"
     db.close()

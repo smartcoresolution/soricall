@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
+import QRCode from "qrcode";
 import {
   Activity, AlertTriangle, ArrowLeft, Bell, Check, CheckCircle2, ChevronRight,
   CircleUserRound, Clock3, Download, FileClock, HeartHandshake, Home, LockKeyhole, Mic,
@@ -12,7 +13,7 @@ import "./feedback.css";
 
 type Screen =
   | "welcome" | "parentConnect" | "setupChoice" | "selfPhone" | "signup" | "consent" | "signupComplete" | "login" | "home" | "protected"
-  | "contacts" | "deviceInvite" | "registrationPlan" | "invite" | "enrollmentStatus" | "biometrics" | "normal" | "analysis" | "blocked"
+  | "contacts" | "deviceInvite" | "registrationPlan" | "invite" | "enrollmentStatus" | "enrollmentVerify" | "biometrics" | "normal" | "analysis" | "blocked"
   | "faceRegistration" | "parentAppInstall" | "enrollmentComplete" | "confirm" | "history" | "admin";
 
 const familyRelations = ["친할아버지", "친할머니", "외할아버지", "외할머니", "아버지", "어머니", "배우자의 아버지", "배우자의 어머니", "기타"];
@@ -25,10 +26,10 @@ const protectedRelationCodes: Record<string, string> = {
 };
 const contactRelationCodes: Record<string, string> = { 아들: "SON", 딸: "DAUGHTER", 손자: "GRANDSON", 손녀: "GRANDDAUGHTER", 배우자: "SPOUSE", "기타 가족": "OTHER" };
 
-type AuthResponse = { access_token: string; refresh_token: string; user: UserPublic };
+type AuthResponse = { access_token: string; refresh_token: string; user: UserPublic; family_id?: string | null; senior_id?: string | null };
 type ProtectedUserResponse = { id: string; name?: string; relation_code?: string; phone_number_last4?: string | null; protection_status?: string };
 type RegisteredProtectedFamily = { id: string; name: string; relation: string; phoneLast4: string; status?: string };
-type ConfirmationContactResponse = { id: string; name: string; relation_code?: string | null; phone_number_last4?: string | null };
+type ConfirmationContactResponse = { id: string; name: string; relation_code?: string | null; phone_number_last4?: string | null; approval_status?: string; trust_level?: string };
 type FamilyMemberView = { id: string; name: string; relation: string | null };
 type VoiceProfileCreated = { id: string; status?: string };
 type FaceProfileView = { id: string; status?: string };
@@ -44,6 +45,10 @@ type EnrollmentInvitation = {
   sent_at: string;
   expires_at: string;
   enrollment_url: string | null;
+  member_approval_status: string;
+  member_trust_level: string;
+  phone_verified: boolean;
+  requested_assets: string[];
 };
 type DeviceEnrollment = { id: string; protected_user_id: string; protected_user_name: string; phone_number_last4: string | null; status: string; enrollment_url: string | null };
 const SESSION_STORAGE_KEY = "soricall.dev.session";
@@ -91,7 +96,7 @@ function App() {
   const missingResumeToken = query.get("resume_device_enrollment") === "1" && !deviceToken;
   const sessionRestoreStartedRef = useRef(false);
   const newSignupStartedRef = useRef(false);
-  const [screen, setScreen] = useState<Screen>(deviceToken ? "parentConnect" : enrollmentToken ? "biometrics" : "welcome");
+  const [screen, setScreen] = useState<Screen>(deviceToken ? "parentConnect" : enrollmentToken ? "enrollmentVerify" : "welcome");
   const [setupMode, setSetupMode] = useState<SetupMode>("helper");
   const [protectedRelation, setProtectedRelation] = useState("아버지");
   const [contactRelation, setContactRelation] = useState("딸");
@@ -112,6 +117,9 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [apiError, setApiError] = useState("");
   const [apiMessage, setApiMessage] = useState("");
+  const [invitePhone, setInvitePhone] = useState("");
+  const [inviteVerificationId, setInviteVerificationId] = useState("");
+  const [inviteVerificationCode, setInviteVerificationCode] = useState("");
 
   const resetFamilyState = () => {
     setFamilyId(null);
@@ -150,6 +158,7 @@ function App() {
         setEnrollmentContact({ id: invitation.family_member_id, name: invitation.family_member_name });
         if (invitation.status === "COMPLETED") setScreen("enrollmentComplete");
         else if (invitation.status === "EXPIRED") throw new Error("invitation expired");
+        else setScreen(invitation.phone_verified ? "biometrics" : "enrollmentVerify");
       })
       .catch((error) => setApiError(userMessage(error)))
       .finally(() => setBusy(false));
@@ -275,7 +284,7 @@ function App() {
     if (signup.password !== signup.passwordConfirm) throw new Error("비밀번호 확인이 일치하지 않습니다.");
     let auth: AuthResponse;
     try {
-      auth = await apiPost<AuthResponse>("/api/v1/auth/register", { phone_number: signup.phone, verification_token: signup.verificationToken, password: signup.password, display_name: signup.name, role: "GUARDIAN" });
+      auth = await apiPost<AuthResponse>("/api/v1/auth/register", { phone_number: signup.phone, verification_token: signup.verificationToken, password: signup.password, display_name: signup.name, role: "SENIOR" });
     } catch (error) {
       if (error instanceof Error && error.message === "phone number already registered") {
         setLogin({ phone_number: signup.phone, password: "" });
@@ -285,6 +294,8 @@ function App() {
       throw error;
     }
     resetFamilyState();
+    setFamilyId(auth.family_id ?? null);
+    setProtectedUserId(auth.senior_id ?? null);
     setApiAccessToken(auth.access_token); persistSession(auth); setSession(auth); setScreen("signupComplete");
   });
   const sendSignupCode = () => runApi(async () => {
@@ -300,6 +311,8 @@ function App() {
   const signIn = () => runApi(async () => {
     const auth = await apiPost<AuthResponse>("/api/v1/auth/login", login);
     resetFamilyState();
+    setFamilyId(auth.family_id ?? null);
+    setProtectedUserId(auth.senior_id ?? null);
     setApiAccessToken(auth.access_token); persistSession(auth); setSession(auth);
     setScreen("setupChoice");
   });
@@ -355,6 +368,15 @@ function App() {
   const chooseProtectionMode = (mode: SetupMode) => runApi(async () => {
     if (!session) throw new Error("먼저 회원가입 또는 로그인이 필요합니다.");
     setSetupMode(mode);
+    if (mode === "self" && session.family_id && session.senior_id) {
+      setFamilyId(session.family_id);
+      setProtectedUserId(session.senior_id);
+      setEnrollmentContacts([]);
+      setContactForm({ name: "", phone: "", primary: true });
+      setContactRelation("아들");
+      setScreen("contacts");
+      return;
+    }
     let currentFamilyId = familyId;
     if (!currentFamilyId) {
       const family = await apiPost<Family>("/api/v1/families", { name: `${session.user.display_name}님의 통화보호 가족` });
@@ -463,10 +485,10 @@ function App() {
       setApiMessage(`${contact.name}님을 확인 가족에서 삭제했습니다.`);
     });
   };
-  const sendEnrollmentInvitations = () => runApi(async () => {
+  const sendEnrollmentInvitations = (channel: "LINK" | "QR" | "DIRECT" = "LINK") => runApi(async () => {
     if (!familyId || enrollmentContacts.length === 0) throw new Error("등록 요청을 보낼 가족이 없습니다.");
     const sent = await Promise.all(enrollmentContacts.map((contact) =>
-      apiPost<EnrollmentInvitation>(`/api/v1/families/${familyId}/members/${contact.id}/enrollment-invitations`, {}),
+      apiPost<EnrollmentInvitation>(`/api/v1/families/${familyId}/members/${contact.id}/enrollment-invitations?channel=${channel}`, {}),
     ));
     setInvitations(sent);
     setScreen("enrollmentStatus");
@@ -476,6 +498,17 @@ function App() {
     const resent = await apiPost<EnrollmentInvitation>(`/api/v1/families/${familyId}/enrollment-invitations/${invitationId}/resend`, {});
     setInvitations((current) => current.map((item) => item.id === invitationId ? resent : item));
     setApiMessage("등록 링크를 다시 보냈습니다.");
+  });
+  const approveEnrollment = (invitation: EnrollmentInvitation) => runApi(async () => {
+    if (!familyId || !protectedUserId) throw new Error("보호 대상 정보가 없습니다.");
+    await apiPost(
+      `/api/v1/families/${familyId}/protected-call-users/${protectedUserId}/confirmation-contacts/${invitation.family_member_id}/approve`,
+      {},
+    );
+    setInvitations((current) => current.map((item) => item.id === invitation.id
+      ? { ...item, member_approval_status: "ACTIVE" }
+      : item));
+    setApiMessage(`${invitation.family_member_name}님을 확인 가족으로 승인했습니다.`);
   });
   const copyEnrollmentLink = async (invitation: EnrollmentInvitation) => {
     if (!invitation.enrollment_url) {
@@ -490,6 +523,34 @@ function App() {
       setApiError(`링크를 복사하지 못했습니다: ${absoluteUrl}`);
     }
   };
+  const shareEnrollmentLink = async (invitation: EnrollmentInvitation) => {
+    if (!invitation.enrollment_url) return;
+    const url = new URL(invitation.enrollment_url, window.location.origin).toString();
+    if (navigator.share) {
+      await navigator.share({ title: "SoriCall 가족 등록 요청", text: `${invitation.family_member_name}님의 음성 등록 요청입니다.`, url });
+    } else {
+      await navigator.clipboard.writeText(url);
+      setApiMessage("공유 기능을 지원하지 않아 링크를 복사했습니다.");
+    }
+  };
+  const sendInvitePhoneCode = () => runApi(async () => {
+    if (!enrollmentToken) throw new Error("초대 정보가 없습니다.");
+    const sent = await apiPost<{ verification_id: string; development_code?: string | null }>(
+      `/api/v1/enrollment-invitations/phone-verification?token=${encodeURIComponent(enrollmentToken)}`,
+      { phone_number: invitePhone },
+    );
+    setInviteVerificationId(sent.verification_id);
+    setInviteVerificationCode(sent.development_code ?? "");
+    setApiMessage(sent.development_code ? `개발용 인증번호: ${sent.development_code}` : "인증번호를 문자로 보냈습니다.");
+  });
+  const confirmInvitePhoneCode = () => runApi(async () => {
+    if (!enrollmentToken) throw new Error("초대 정보가 없습니다.");
+    await apiPost(
+      `/api/v1/enrollment-invitations/phone-verification/confirm?token=${encodeURIComponent(enrollmentToken)}`,
+      { verification_id: inviteVerificationId, code: inviteVerificationCode },
+    );
+    setScreen("biometrics");
+  });
   const saveBiometrics = (audioRef: string, durationMs: number, faceImageRef: string | null) => runApi(async () => {
     if (!enrollmentContact) throw new Error("음성을 등록할 확인 가족 정보가 없습니다.");
     if (enrollmentToken) {
@@ -525,14 +586,16 @@ function App() {
     setInvitations((current) => current.map((item) => item.family_member_id === enrollmentContact.id ? { ...item, status: "COMPLETED" } : item));
     setScreen("faceRegistration");
   });
-  const saveFaceRegistration = (faceImageRef: string) => runApi(async () => {
+  const saveFaceRegistration = (faceImageRef: string | null) => runApi(async () => {
     if (!enrollmentContact) throw new Error("얼굴을 등록할 가족 정보가 없습니다.");
-    await apiPost("/api/v1/face-profiles", {
-      family_member_id: enrollmentContact.id,
-      display_name: enrollmentContact.name,
-      image_ref: faceImageRef,
-      consent_accepted: true,
-    });
+    if (faceImageRef) {
+      await apiPost("/api/v1/face-profiles", {
+        family_member_id: enrollmentContact.id,
+        display_name: enrollmentContact.name,
+        image_ref: faceImageRef,
+        consent_accepted: true,
+      });
+    }
     setScreen("parentAppInstall");
   });
   const shareParentInstall = async (family: RegisteredProtectedFamily) => {
@@ -563,7 +626,7 @@ function App() {
   const title = useMemo(() => ({
     parentConnect: "부모님 통화 보호 연결", setupChoice: "보호 방법 선택", selfPhone: "본인 휴대전화 확인", signup: "회원가입", consent: "서비스 이용 동의", signupComplete: "가입 완료", login: "로그인",
     protected: "가족 등록", contacts: "확인 가족 등록", deviceInvite: "부모님 앱 연결", registrationPlan: "등록 항목 안내", invite: "등록 요청 보내기",
-    enrollmentStatus: "가족 등록 현황", biometrics: setupMode === "helper" ? "자녀 음성 등록" : "가족 본인 등록", faceRegistration: "얼굴 등록", parentAppInstall: "부모님 앱 설치", enrollmentComplete: "등록 완료", normal: "안전한 전화", analysis: "의심전화 분석",
+    enrollmentStatus: "가족 등록 현황", enrollmentVerify: "초대 가족 본인 확인", biometrics: setupMode === "helper" ? "자녀 음성 등록" : "가족 본인 등록", faceRegistration: "얼굴 등록", parentAppInstall: "부모님 앱 설치", enrollmentComplete: "등록 완료", normal: "안전한 전화", analysis: "의심전화 분석",
     blocked: "고위험 전화 차단", confirm: "가족 확인 요청", history: "통화기록",
     admin: "관리자 페이지", home: "통화 보호 홈", welcome: "",
   }[screen]), [screen]);
@@ -635,7 +698,8 @@ function App() {
         {screen === "deviceInvite" && <DeviceInvite familyName={protectedForm.name} link={parentInstallLink} onNext={() => setScreen("contacts")} />}
         {screen === "registrationPlan" && <RegistrationPlan contacts={enrollmentContacts} onNext={() => setScreen("invite")} />}
         {screen === "invite" && <EnrollmentInvite contacts={enrollmentContacts} onSend={sendEnrollmentInvitations} />}
-        {screen === "enrollmentStatus" && <EnrollmentStatus invitations={invitations} onResend={resendInvitation} onOpen={openFamilyEnrollment} onCopy={copyEnrollmentLink} onHome={() => setScreen("home")} />}
+        {screen === "enrollmentStatus" && <EnrollmentStatus invitations={invitations} onResend={resendInvitation} onOpen={openFamilyEnrollment} onCopy={copyEnrollmentLink} onShare={shareEnrollmentLink} onApprove={approveEnrollment} onHome={() => setScreen("home")} />}
+        {screen === "enrollmentVerify" && <EnrollmentPhoneVerification phone={invitePhone} setPhone={setInvitePhone} verificationId={inviteVerificationId} code={inviteVerificationCode} setCode={setInviteVerificationCode} busy={busy} onSend={sendInvitePhoneCode} onConfirm={confirmInvitePhoneCode} />}
         {screen === "biometrics" && enrollmentContact && <Biometrics contactName={enrollmentContact.name} protectedFamilies={protectedFamilies} onManageTargets={() => setScreen("protected")} onDone={saveBiometrics} />}
         {screen === "faceRegistration" && enrollmentContact && <FaceRegistration contactName={enrollmentContact.name} onDone={saveFaceRegistration} />}
         {screen === "parentAppInstall" && <ParentAppInstall families={protectedFamilies} onShare={shareParentInstall} onHome={() => setScreen("home")} />}
@@ -648,9 +712,9 @@ function App() {
         {screen === "history" && <HistoryPage />}
         {screen === "admin" && <AdminPage />}
       </main>
-      {screen !== "signupComplete" && ((busy && screen !== "consent" && screen !== "protected" && screen !== "setupChoice" && screen !== "login") || apiMessage || (apiError && screen !== "consent" && screen !== "login")) && <div className={`api-feedback ${apiError ? "error" : ""}`}>{busy ? "안전하게 저장하고 있습니다…" : apiError || apiMessage}<button onClick={() => { setApiError(""); setApiMessage(""); }}><X /></button></div>}
+      {screen !== "signupComplete" && ((busy && screen !== "consent" && screen !== "protected" && screen !== "setupChoice" && screen !== "login") || apiMessage || (apiError && screen !== "consent" && screen !== "login")) && <div className={`api-feedback ${apiError ? "error" : ""}`} role={apiError ? "alert" : "status"} aria-live={apiError ? "assertive" : "polite"} aria-atomic="true">{busy ? "안전하게 저장하고 있습니다…" : apiError || apiMessage}<button onClick={() => { setApiError(""); setApiMessage(""); }} aria-label="알림 닫기"><X /></button></div>}
 
-      {!([ "welcome", "parentConnect", "setupChoice", "selfPhone", "signup", "consent", "signupComplete", "login", "protected", "contacts", "deviceInvite", "registrationPlan", "invite", "enrollmentStatus", "biometrics", "faceRegistration", "parentAppInstall", "enrollmentComplete", "normal", "analysis", "blocked", "confirm"] as Screen[]).includes(screen) && (
+      {!([ "welcome", "parentConnect", "setupChoice", "selfPhone", "signup", "consent", "signupComplete", "login", "protected", "contacts", "deviceInvite", "registrationPlan", "invite", "enrollmentStatus", "enrollmentVerify", "biometrics", "faceRegistration", "parentAppInstall", "enrollmentComplete", "normal", "analysis", "blocked", "confirm"] as Screen[]).includes(screen) && (
         <nav className="bottom-nav">
           <NavItem active={screen === "home"} icon={<Home />} label="홈" onClick={() => setScreen("home")} />
           <NavItem active={screen === "protected" || screen === "contacts"} icon={<Users />} label="가족" onClick={() => setScreen("protected")} />
@@ -765,25 +829,43 @@ function RegistrationPlan({ contacts, onNext }: { contacts: ConfirmationContactR
   <button className="primary full" disabled={contacts.length === 0} onClick={onNext}>다음: 등록 요청 보내기</button>
 </FormCard>; }
 
-function EnrollmentInvite({ contacts, onSend }: { contacts: ConfirmationContactResponse[]; onSend: () => void }) {
+function EnrollmentInvite({ contacts, onSend }: { contacts: ConfirmationContactResponse[]; onSend: (channel: "LINK" | "QR" | "DIRECT") => void }) {
   return <FormCard step="3 / 3" title="가족에게 등록 요청을 보내세요" description="가족이 자신의 휴대전화에서 직접 동의하고 목소리와 얼굴을 등록합니다.">
     <InfoBox icon={<Shield />}><b>현재는 개발환경용 등록 방식입니다.</b><br/>3일 동안 유효한 링크를 만든 뒤 직접 복사해 전달합니다.</InfoBox>
     <div className="enrollment-list">{contacts.map((contact) => <div className="enrollment-person" key={contact.id}><span className="person-icon">{contact.name.slice(0, 1)}</span><span><b>{contact.name}</b><small>음성 필수 · 얼굴 선택</small></span><em>전송 준비</em></div>)}</div>
-    <button className="primary full" disabled={contacts.length === 0} onClick={onSend}><Bell /> 등록 요청 보내기</button>
+    <button className="primary full" disabled={contacts.length === 0} onClick={() => onSend("LINK")}><Bell /> 안전한 링크 보내기</button>
+    <button className="secondary full" disabled={contacts.length === 0} onClick={() => onSend("QR")}>QR로 바로 연결 · 5분</button>
+    <button className="secondary full" disabled={contacts.length === 0} onClick={() => onSend("DIRECT")}>옆에서 직접 등록</button>
   </FormCard>;
 }
 
-function EnrollmentStatus({ invitations, onResend, onOpen, onCopy, onHome }: { invitations: EnrollmentInvitation[]; onResend: (id: string) => void; onOpen: (invitation: EnrollmentInvitation) => void; onCopy: (invitation: EnrollmentInvitation) => void; onHome: () => void }) {
-  const labels: Record<string, string> = { PENDING: "응답 대기", COMPLETED: "등록 완료", EXPIRED: "링크 만료" };
+function EnrollmentStatus({ invitations, onResend, onOpen, onCopy, onShare, onApprove, onHome }: { invitations: EnrollmentInvitation[]; onResend: (id: string) => void; onOpen: (invitation: EnrollmentInvitation) => void; onCopy: (invitation: EnrollmentInvitation) => void; onShare: (invitation: EnrollmentInvitation) => void; onApprove: (invitation: EnrollmentInvitation) => void; onHome: () => void }) {
+  const labels: Record<string, string> = { PENDING: "응답 대기", COMPLETED: "자료 도착", EXPIRED: "링크 만료" };
   return <FormCard title="가족 등록 현황" description="가족별 음성·얼굴 등록 진행 상태를 확인할 수 있습니다.">
-    <div className="enrollment-list">{invitations.map((invitation) => <div className="enrollment-person status" key={invitation.id}><span className="person-icon">{invitation.family_member_name.slice(0, 1)}</span><span><b>{invitation.family_member_name}</b><small>휴대전화 끝 {invitation.phone_number_last4 ?? "----"}</small>{invitation.enrollment_url && <code className="development-link">{new URL(invitation.enrollment_url, window.location.origin).toString()}</code>}</span><em className={invitation.status.toLowerCase()}>{labels[invitation.status] ?? invitation.status}</em>{invitation.status !== "COMPLETED" && <>{invitation.enrollment_url && <><button className="link" onClick={() => onCopy(invitation)}>링크 복사</button><button className="link" onClick={() => onOpen(invitation)}>새 창에서 열기</button></>}<button className="link" onClick={() => onResend(invitation.id)}>링크 재발급</button></>}</div>)}</div>
+    <div className="enrollment-list">{invitations.map((invitation) => { const approval = invitation.member_approval_status ?? (invitation.status === "COMPLETED" ? "REVIEW_REQUIRED" : "INVITED"); return <div className="enrollment-person status" key={invitation.id}><span className="person-icon">{invitation.family_member_name.slice(0, 1)}</span><span><b>{invitation.family_member_name}</b><small>휴대전화 끝 {invitation.phone_number_last4 ?? "----"} · 신뢰등급 {invitation.member_trust_level ?? "D"} · {invitation.channel}</small>{invitation.enrollment_url && <code className="development-link">{new URL(invitation.enrollment_url, window.location.origin).toString()}</code>}</span>{invitation.channel === "QR" && invitation.enrollment_url && invitation.status === "PENDING" && <EnrollmentQr url={new URL(invitation.enrollment_url, window.location.origin).toString()} name={invitation.family_member_name} />}<em className={approval.toLowerCase()}>{approval === "ACTIVE" ? "승인 완료" : labels[invitation.status] ?? invitation.status}</em>{approval === "REVIEW_REQUIRED" ? <button className="primary" onClick={() => onApprove(invitation)}>이 가족이 맞습니다</button> : invitation.status !== "COMPLETED" && <>{invitation.enrollment_url && <><button className="link" onClick={() => onShare(invitation)}>공유하기</button><button className="link" onClick={() => onCopy(invitation)}>링크 복사</button><button className="link" onClick={() => onOpen(invitation)}>새 창에서 열기</button></>}<button className="link" onClick={() => onResend(invitation.id)}>링크 재발급</button></>}</div>; })}</div>
     <InfoBox icon={<Bell />}><b>개발환경에서는 링크를 직접 전달해 등록 흐름을 확인합니다.</b><br/>실제 SMS 발송은 운영 전달 제공자를 연결한 뒤 활성화합니다.</InfoBox>
     <button className="primary full" onClick={onHome}>안심 홈으로 이동</button>
   </FormCard>;
 }
 
+function EnrollmentQr({ url, name }: { url: string; name: string }) {
+  const [src, setSrc] = useState("");
+  useEffect(() => { void QRCode.toDataURL(url, { width: 220, margin: 2 }).then(setSrc); }, [url]);
+  return src ? <img className="enrollment-qr" src={src} alt={`${name}님의 5분 한정 등록 QR`} /> : null;
+}
+
+function EnrollmentPhoneVerification({ phone, setPhone, verificationId, code, setCode, busy, onSend, onConfirm }: { phone: string; setPhone: (value: string) => void; verificationId: string; code: string; setCode: (value: string) => void; busy: boolean; onSend: () => void; onConfirm: () => void }) {
+  return <FormCard title="초대받은 가족 본인 확인" description="가족 자료를 안전하게 등록하기 위해 초대받은 휴대전화 번호를 확인합니다.">
+    <InfoBox icon={<Shield />}><b>초대받은 본인의 휴대전화 번호를 입력해 주세요.</b><br/>번호가 일치해야 음성과 선택 얼굴정보를 등록할 수 있습니다.</InfoBox>
+    <Field label="휴대전화 번호" placeholder="010-0000-0000" type="tel" value={phone} onChange={setPhone}/>
+    {!verificationId
+      ? <button className="primary full" disabled={busy || !isValidMobilePhone(phone)} onClick={onSend}>인증번호 받기</button>
+      : <><Field label="문자 인증번호" placeholder="6자리 인증번호" value={code} onChange={(value) => setCode(value.replace(/\D/g, "").slice(0, 6))}/><button className="primary full" disabled={busy || code.length !== 6} onClick={onConfirm}>본인 확인하고 음성 등록</button></>}
+  </FormCard>;
+}
+
 function Biometrics({ contactName, protectedFamilies, onManageTargets, onDone }: { contactName: string; protectedFamilies: RegisteredProtectedFamily[]; onManageTargets: () => void; onDone: (audioRef: string, durationMs: number, faceImageRef: string | null) => void }) {
-  const minimumRecordingMs = 10_000;
+  const minimumRecordingMs = 15_000;
   const maximumRecordingMs = 60_000;
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -829,7 +911,7 @@ function Biometrics({ contactName, protectedFamilies, onManageTargets, onDone }:
         const recordedDuration = Math.max(1, elapsedRef.current);
         setDurationMs(recordedDuration);
         if (recordedDuration < minimumRecordingMs) {
-          setMediaError("목소리 특징을 정확히 확인하려면 문장을 끝까지 읽어 10초 이상 녹음해 주세요.");
+          setMediaError("목소리 특징을 정확히 확인하려면 문장을 끝까지 읽어 15초 이상 녹음해 주세요.");
         }
         setRecording(false);
         setPaused(false);
@@ -874,13 +956,13 @@ function Biometrics({ contactName, protectedFamilies, onManageTargets, onDone }:
 
   return <FormCard step="자녀 음성 등록" title={`${contactName}님, 목소리를 등록해 주세요`} description="부모님과의 통화 분석을 위해 아래 문장을 평소 말투로 읽어 주세요.">
     <section className="protected-target-summary"><div className="section-heading"><div><span>현재 보호 대상</span><h2>{protectedFamilies.length > 0 ? `${protectedFamilies.length}명의 전화를 보호합니다` : "보호 대상을 추가해 주세요"}</h2></div><button className="link" onClick={onManageTargets}><Plus /> 보호 대상 추가</button></div>{protectedFamilies.length > 0 && <div className="target-chip-row">{protectedFamilies.map((family) => <span className="target-chip" key={family.id}><b>{family.name}</b><small>{family.relation}</small></span>)}</div>}</section>
-    <div className={`voice-recorder ${recording ? "is-recording" : ""}`}><div className="voice-script"><p>엄마, 오늘 저녁 일곱 시쯤 집에 도착하면 다시 전화드릴게요.</p><p>창문 옆 화분에 물도 주고, 따뜻한 차를 마시면서 천천히 이야기해요.</p><p>급한 일이 있어도 먼저 가족끼리 약속한 방법으로 꼭 확인해 주세요.</p></div>{recording ? <div className="recording-control"><div className="recording-meta"><b>{paused ? "녹음 일시정지" : "녹음 중"}</b><span>{elapsedSeconds}초 / 60초</span></div><div className="recording-progress"><i style={{width: `${(elapsedMs / maximumRecordingMs) * 100}%`}} /></div><div className="recording-actions"><button className="secondary" onClick={togglePause}>{paused ? <Play /> : <Pause />}{paused ? "계속 녹음" : "녹음 멈춤"}</button><button className="primary" onClick={finishRecording}><CheckCircle2 /> 녹음 끝내기</button></div></div> : <button className="primary voice-start" onClick={startRecording}><Mic /> {audioRef ? "다시 녹음" : "녹음 시작"}</button>}{audioRef && !recording && <small className="recorded-status">녹음 시간 {(durationMs / 1000).toFixed(1)}초 {durationMs >= minimumRecordingMs ? "· 음성 등록 준비 완료" : "· 10초 이상 다시 녹음해 주세요"}</small>}</div>
+    <div className={`voice-recorder ${recording ? "is-recording" : ""}`}><div className="voice-script"><p>엄마, 오늘 저녁 일곱 시쯤 집에 도착하면 다시 전화드릴게요.</p><p>창문 옆 화분에 물도 주고, 따뜻한 차를 마시면서 천천히 이야기해요.</p><p>급한 일이 있어도 먼저 가족끼리 약속한 방법으로 꼭 확인해 주세요.</p></div>{recording ? <div className="recording-control"><div className="recording-meta"><b>{paused ? "녹음 일시정지" : "녹음 중"}</b><span>{elapsedSeconds}초 / 60초</span></div><div className="recording-progress"><i style={{width: `${(elapsedMs / maximumRecordingMs) * 100}%`}} /></div><div className="recording-actions"><button className="secondary" onClick={togglePause}>{paused ? <Play /> : <Pause />}{paused ? "계속 녹음" : "녹음 멈춤"}</button><button className="primary" onClick={finishRecording}><CheckCircle2 /> 녹음 끝내기</button></div></div> : <button className="primary voice-start" onClick={startRecording}><Mic /> {audioRef ? "다시 녹음" : "녹음 시작"}</button>}{audioRef && !recording && <small className="recorded-status">녹음 시간 {(durationMs / 1000).toFixed(1)}초 {durationMs >= minimumRecordingMs ? "· 음성 등록 준비 완료" : "· 15초 이상 다시 녹음해 주세요"}</small>}</div>
     {mediaError && <span className="validation-error">{mediaError}</span>}
     <button className="primary full" disabled={!audioRef || durationMs < minimumRecordingMs || recording} onClick={() => onDone(audioRef, durationMs, null)}>등록 완료하기</button>
   </FormCard>;
 }
 
-function FaceRegistration({ contactName, onDone }: { contactName: string; onDone: (faceImageRef: string) => void }) {
+function FaceRegistration({ contactName, onDone }: { contactName: string; onDone: (faceImageRef: string | null) => void }) {
   const [preview, setPreview] = useState("");
   const [faceImageRef, setFaceImageRef] = useState("");
   const [error, setError] = useState("");
@@ -891,9 +973,16 @@ function FaceRegistration({ contactName, onDone }: { contactName: string; onDone
       return;
     }
     setError("");
-    setFaceImageRef(`dev-local://${file.name}`);
+    if (file.size > 10 * 1024 * 1024) {
+      setError("얼굴 사진은 10MB 이하만 등록할 수 있습니다.");
+      return;
+    }
     const reader = new FileReader();
-    reader.onloadend = () => setPreview(String(reader.result));
+    reader.onloadend = () => {
+      const dataUrl = String(reader.result);
+      setPreview(dataUrl);
+      setFaceImageRef(dataUrl);
+    };
     reader.readAsDataURL(file);
   };
   return <FormCard step="얼굴 등록" title={`${contactName}님, 얼굴을 등록해 주세요`} description="정면을 바라보고 얼굴이 선명하게 보이도록 촬영해 주세요.">
@@ -905,6 +994,7 @@ function FaceRegistration({ contactName, onDone }: { contactName: string; onDone
     </div>
     {error && <span className="validation-error">{error}</span>}
     <button className="primary full" disabled={!faceImageRef} onClick={() => onDone(faceImageRef)}>얼굴 등록 완료</button>
+    <button className="secondary full" onClick={() => onDone(null)}>나중에 등록하기 · 선택사항</button>
   </FormCard>;
 }
 

@@ -4,9 +4,9 @@ from datetime import datetime, timedelta, timezone
 import secrets
 
 from app.api.deps import DbSession
-from app.core.security import create_access_token, create_refresh_token, hash_password, hash_refresh_token, hash_verification_code, normalize_phone_number, verify_password
+from app.core.security import create_access_token, create_refresh_token, hash_password, hash_phone_number, hash_refresh_token, hash_verification_code, normalize_phone_number, phone_last4, verify_password
 from app.core.config import get_settings
-from app.models import PhoneVerification, RefreshToken, User
+from app.models import Family, PhoneVerification, RefreshToken, Senior, User
 from app.schemas import AuthResponse, LoginRequest, PhoneVerificationConfirmRequest, PhoneVerificationConfirmResponse, PhoneVerificationSendRequest, PhoneVerificationSendResponse, RefreshTokenRequest, RegisterRequest, UserPublic
 
 
@@ -81,8 +81,26 @@ def register(request: RegisterRequest, db: DbSession) -> AuthResponse:
     )
     verification.consumed_at = datetime.now(timezone.utc)
     db.add(user)
-    db.commit()
-    db.refresh(user)
+    db.flush()
+    if request.role == "SENIOR":
+        family = Family(
+            name=f"{request.display_name}님의 통화보호 가족",
+            created_by=user.id,
+        )
+        db.add(family)
+        db.flush()
+        db.add(
+            Senior(
+                family_id=family.id,
+                user_id=user.id,
+                name=request.display_name,
+                member_type="PROTECTED_CALL_USER",
+                relation_code="SELF",
+                protection_status="PREPARING",
+                phone_number_hash=hash_phone_number(phone_number),
+                phone_number_last4=phone_last4(phone_number),
+            )
+        )
 
     return _auth_response(user, db)
 
@@ -119,10 +137,17 @@ def _auth_response(user: User, db) -> AuthResponse:
         expires_at=datetime.now(timezone.utc) + timedelta(days=settings.jwt_refresh_token_expire_days),
     ))
     db.commit()
+    senior = db.scalar(
+        select(Senior)
+        .where(Senior.user_id == user.id, Senior.relation_code == "SELF")
+        .order_by(Senior.created_at)
+    )
     return AuthResponse(
         access_token=create_access_token(user.id, settings.jwt_access_token_expire_minutes * 60),
         refresh_token=raw_refresh,
         user=UserPublic.model_validate(user),
+        family_id=senior.family_id if senior else None,
+        senior_id=senior.id if senior else None,
     )
 
 

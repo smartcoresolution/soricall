@@ -34,6 +34,18 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="soricall" android:host="connect" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="audio/*" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="audio/*" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
         </activity>
 
         <service
@@ -42,6 +54,14 @@
             android:permission="android.permission.BIND_SCREENING_SERVICE">
             <intent-filter>
                 <action android:name="android.telecom.CallScreeningService" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".service.SoriFirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
 

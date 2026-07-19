@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -66,6 +68,8 @@ class AuthResponse(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     user: UserPublic
+    family_id: str | None = None
+    senior_id: str | None = None
 
 
 class RefreshTokenRequest(BaseModel):
@@ -121,6 +125,13 @@ class SeniorResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ScreeningCacheResponse(BaseModel):
+    version: str
+    generated_at: datetime
+    family_number_hashes: list[str]
+    risk_number_hashes: list[str]
+
+
 class GuardianCreate(BaseModel):
     user_id: str
     relation: str | None = None
@@ -169,6 +180,7 @@ class ConfirmationContactCreate(BaseModel):
 class ConfirmationContactResponse(BaseModel):
     id: str
     family_id: str
+    protected_user_id: str
     name: str
     member_type: str
     relation_code: str | None
@@ -176,6 +188,8 @@ class ConfirmationContactResponse(BaseModel):
     is_primary_contact: bool
     notification_priority: int
     notify_enabled: bool
+    approval_status: str
+    trust_level: str
 
     model_config = {"from_attributes": True}
 
@@ -188,10 +202,14 @@ class EnrollmentInvitationResponse(BaseModel):
     relation_code: str | None
     phone_number_last4: str | None
     channel: str
+    requested_assets: list[str]
     status: str
     sent_at: str
     expires_at: str
     enrollment_url: str | None = None
+    member_approval_status: str
+    member_trust_level: str
+    phone_verified: bool
 
     model_config = {"from_attributes": True}
 
@@ -202,6 +220,35 @@ class EnrollmentCompleteRequest(BaseModel):
     mime_type: str = Field(default="audio/webm", min_length=1)
     face_image_ref: str | None = None
     consent_accepted: bool
+
+
+class MediaImportSessionCreate(BaseModel):
+    family_id: str
+    family_member_id: str
+    filename: str = Field(min_length=1, max_length=255)
+    mime_type: str = Field(min_length=1, max_length=100)
+    source: str = Field(default="EXTERNAL_SHARE", pattern="^(EXTERNAL_SHARE|FILE_PICKER)$")
+
+
+class MediaImportValidate(BaseModel):
+    data_url: str = Field(min_length=1)
+
+
+class MediaImportSessionResponse(BaseModel):
+    id: str
+    family_id: str
+    family_member_id: str
+    source: str
+    filename: str
+    declared_mime_type: str
+    detected_mime_type: str | None
+    size_bytes: int | None
+    status: str
+    trust_level: str
+    failure_code: str | None
+    expires_at: datetime
+
+    model_config = {"from_attributes": True}
 
 
 class SafeWordUpsert(BaseModel):
@@ -260,6 +307,10 @@ class VoiceSampleResponse(BaseModel):
     audio_ref: str | None
     purpose: str
     retained: bool
+    content_hash: str | None
+    size_bytes: int | None
+    validation_status: str
+    deleted_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -298,6 +349,10 @@ class FaceProfileResponse(BaseModel):
     status: str
     consent_accepted: bool
     match_score: int | None
+    size_bytes: int | None
+    validation_status: str
+    consented_at: datetime | None
+    deleted_at: datetime | None
 
     model_config = {"from_attributes": True}
 

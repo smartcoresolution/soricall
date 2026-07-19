@@ -29,6 +29,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
@@ -79,6 +82,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         incomingRisk.value = intent.getStringExtra("risk_level")
         incomingDeviceToken.value = deviceToken(intent)
+        captureSharedMedia(intent)
         setContent { SoriCallAndroidApp(incomingRisk.value, incomingDeviceToken.value) }
     }
 
@@ -87,10 +91,30 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         incomingRisk.value = intent.getStringExtra("risk_level")
         incomingDeviceToken.value = deviceToken(intent)
+        captureSharedMedia(intent)
     }
 
     private fun deviceToken(intent: Intent): String? =
         intent.data?.getQueryParameter("device_token")?.takeIf { it.isNotBlank() }
+
+    @Suppress("DEPRECATION")
+    private fun captureSharedMedia(intent: Intent) {
+        if (intent.action !in setOf(Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE)) return
+        val uri = if (intent.action == Intent.ACTION_SEND) {
+            intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)
+        } else {
+            intent.getParcelableArrayListExtra<android.net.Uri>(Intent.EXTRA_STREAM)?.firstOrNull()
+        }
+        uri?.let {
+            runCatching {
+                contentResolver.takePersistableUriPermission(
+                    it,
+                    intent.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION),
+                )
+            }
+            (application as SoriCallApplication).savePendingSharedMedia(it.toString(), intent.type)
+        }
+    }
 }
 
 private enum class AppScreen {
@@ -164,8 +188,8 @@ private fun SoriCallAndroidApp(incomingRisk: String?, incomingDeviceToken: Strin
                         } },
                         onNext = { screen = AppScreen.CONSENT },
                     )
-                    AppScreen.CONSENT -> ConsentScreen { apiAction { val auth = application.api.register(signupPhone, signupVerificationToken, signupPassword, signupName); application.saveAuth(auth.accessToken, auth.refreshToken, auth.userId); screen = AppScreen.PROTECTED } }
-                    AppScreen.LOGIN -> LoginScreen(loginPhone, { loginPhone = it }, loginPassword, { loginPassword = it }) { apiAction { val auth = application.api.login(loginPhone, loginPassword); application.saveAuth(auth.accessToken, auth.refreshToken, auth.userId); screen = AppScreen.HOME } }
+                    AppScreen.CONSENT -> ConsentScreen { apiAction { val auth = application.api.register(signupPhone, signupVerificationToken, signupPassword, signupName); application.saveAuth(auth.accessToken, auth.refreshToken, auth.userId, auth.seniorId); auth.seniorId?.let { application.refreshScreeningCache(it) }; familyId = auth.familyId; protectedUserId = auth.seniorId; screen = AppScreen.CONTACT } }
+                    AppScreen.LOGIN -> LoginScreen(loginPhone, { loginPhone = it }, loginPassword, { loginPassword = it }) { apiAction { val auth = application.api.login(loginPhone, loginPassword); application.saveAuth(auth.accessToken, auth.refreshToken, auth.userId, auth.seniorId); auth.seniorId?.let { application.refreshScreeningCache(it) }; familyId = auth.familyId; protectedUserId = auth.seniorId; screen = AppScreen.HOME } }
                     AppScreen.PROTECTED -> ProtectedFamilyScreen { name, phone, relation -> apiAction { val userId = checkNotNull(application.currentUserId()) { "로그인이 필요합니다." }; val newFamily = familyId ?: application.api.createFamily("$name 통화보호 가족", userId).also { familyId = it }; protectedUserId = application.api.createProtectedUser(newFamily, ProtectedUserCreateDto(name, phone, protectedRelationCode(relation))); screen = AppScreen.CONTACT } }
                     AppScreen.CONTACT -> ConfirmationContactScreen { name, phone, relation, primary -> apiAction { application.api.createConfirmationContact(checkNotNull(familyId) { "가족 정보가 없습니다." }, checkNotNull(protectedUserId) { "보호받을 가족 정보가 없습니다." }, ConfirmationContactCreateDto(name, phone, contactRelationCode(relation), primary)); screen = AppScreen.BIOMETRICS } }
                     AppScreen.BIOMETRICS -> BiometricsScreen { screen = AppScreen.HOME }
@@ -304,6 +328,7 @@ private fun DeviceEnrollmentScreen(token: String) {
                 PrimaryButton("통화 보호 시작", { work {
                     val result = application.api.completeDeviceEnrollment(token)
                     application.completeDeviceConnection(result.protectedUserId)
+                    application.refreshScreeningCache(result.protectedUserId)
                     enrollment = result
                 } }, !busy)
             }
@@ -537,15 +562,15 @@ private fun CallPage(symbol: String, bg: Color, fg: Color, eyebrow: String, titl
 
 @Composable private fun Title(text: String, size: Int) = Text(text, fontSize = size.sp, fontWeight = FontWeight.ExtraBold, color = Ink, lineHeight = (size + 9).sp)
 @Composable private fun Body(text: String, centered: Boolean = false) = Text(text, color = Muted, fontSize = 16.sp, lineHeight = 25.sp, textAlign = if (centered) TextAlign.Center else TextAlign.Start, modifier = if (centered) Modifier.fillMaxWidth() else Modifier)
-@Composable private fun Caption(text: String, color: Color = Muted) = Text(text, color = color, fontSize = 12.sp, lineHeight = 18.sp)
+@Composable private fun Caption(text: String, color: Color = Muted) = Text(text, color = color, fontSize = 14.sp, lineHeight = 21.sp)
 
 @Composable
-private fun Input(label: String, placeholder: String, value: String = "", onValueChange: (String) -> Unit = {}, password: Boolean = false) { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) { Text(label, fontWeight = FontWeight.Bold, fontSize = 13.sp); OutlinedTextField(value, onValueChange, placeholder = { Text(placeholder) }, visualTransformation = if (password) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None, modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(12.dp)) } }
+private fun Input(label: String, placeholder: String, value: String = "", onValueChange: (String) -> Unit = {}, password: Boolean = false) { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) { Text(label, fontWeight = FontWeight.Bold, fontSize = 15.sp); OutlinedTextField(value, onValueChange, placeholder = { Text(placeholder) }, visualTransformation = if (password) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None, modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(12.dp)) } }
 
 @Composable
-private fun PrimaryButton(text: String, onClick: () -> Unit, enabled: Boolean = true) = Button(onClick, enabled = enabled, modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Teal)) { Text(text, fontWeight = FontWeight.Bold, fontSize = 16.sp) }
-@Composable private fun DangerButton(text: String, onClick: () -> Unit) = Button(onClick, modifier = Modifier.fillMaxWidth().height(54.dp), colors = ButtonDefaults.buttonColors(containerColor = Red), shape = RoundedCornerShape(14.dp)) { Text(text, fontWeight = FontWeight.Bold) }
-@Composable private fun OutlinedFullButton(text: String, onClick: () -> Unit) = OutlinedButton(onClick, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(14.dp)) { Text(text, fontWeight = FontWeight.Bold) }
+private fun PrimaryButton(text: String, onClick: () -> Unit, enabled: Boolean = true) = Button(onClick, enabled = enabled, modifier = Modifier.fillMaxWidth().height(58.dp), shape = RoundedCornerShape(14.dp), colors = ButtonDefaults.buttonColors(containerColor = Teal)) { Text(text, fontWeight = FontWeight.Bold, fontSize = 17.sp) }
+@Composable private fun DangerButton(text: String, onClick: () -> Unit) = Button(onClick, modifier = Modifier.fillMaxWidth().height(58.dp), colors = ButtonDefaults.buttonColors(containerColor = Red), shape = RoundedCornerShape(14.dp)) { Text(text, fontWeight = FontWeight.Bold, fontSize = 17.sp) }
+@Composable private fun OutlinedFullButton(text: String, onClick: () -> Unit) = OutlinedButton(onClick, modifier = Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(14.dp)) { Text(text, fontWeight = FontWeight.Bold, fontSize = 16.sp) }
 @Composable private fun TextButtonLine(text: String, onClick: () -> Unit) = Text(text, color = Teal, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(12.dp))
 
 @Composable private fun StatusIcon(text: String, bg: Color, fg: Color, size: Int) = Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Box(Modifier.size(size.dp).background(bg, CircleShape), contentAlignment = Alignment.Center) { Text(text, color = fg, fontSize = (size / 2).sp, fontWeight = FontWeight.Bold) } }
@@ -565,5 +590,5 @@ private fun ChoiceGrid(options: List<String>, selected: String, onSelect: (Strin
 @Composable private fun ReadyRow(symbol: String, title: String, meta: String) = Row(Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(14.dp)).padding(14.dp), verticalAlignment = Alignment.CenterVertically) { CircleBadge(symbol, TealSoft, Teal, 40); Spacer(Modifier.width(12.dp)); Column(Modifier.weight(1f)) { Text(title, fontWeight = FontWeight.Bold); Caption(meta) }; Text("✓", color = Teal, fontWeight = FontWeight.Bold) }
 @Composable private fun CallRecord(status: String, title: String, meta: String, bg: Color, onClick: () -> Unit) = Row(Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(14.dp), verticalAlignment = Alignment.CenterVertically) { Pill(status, bg, if (bg == RedSoft) Red else if (bg == OrangeSoft) Orange else Teal); Spacer(Modifier.width(12.dp)); Column(Modifier.weight(1f)) { Text(title, fontWeight = FontWeight.Bold); Caption(meta) }; Text("›", color = Muted, fontSize = 24.sp) }
 @Composable private fun AnalysisRow(symbol: String, title: String, detail: String, active: Boolean) = Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { CircleBadge(symbol, if (active) OrangeSoft else Color(0xFFF0F3F2), if (active) Orange else Muted, 38); Spacer(Modifier.width(12.dp)); Column { Text(title, fontWeight = FontWeight.Bold, color = if (active) Ink else Muted); Caption(detail) } }
-@Composable private fun AnswerButton(symbol: String, title: String, detail: String, color: Color, onClick: () -> Unit) = Row(Modifier.fillMaxWidth().background(Color.White, RoundedCornerShape(14.dp)).border(1.dp, color.copy(alpha = .25f), RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(16.dp), verticalAlignment = Alignment.CenterVertically) { CircleBadge(symbol, color.copy(alpha = .1f), color, 42); Spacer(Modifier.width(12.dp)); Column { Text(title, color = color, fontWeight = FontWeight.Bold); Caption(detail) } }
+@Composable private fun AnswerButton(symbol: String, title: String, detail: String, color: Color, onClick: () -> Unit) = Row(Modifier.fillMaxWidth().semantics { role = Role.Button }.background(Color.White, RoundedCornerShape(14.dp)).border(1.dp, color.copy(alpha = .25f), RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(18.dp), verticalAlignment = Alignment.CenterVertically) { CircleBadge(symbol, color.copy(alpha = .1f), color, 46); Spacer(Modifier.width(12.dp)); Column { Text(title, color = color, fontWeight = FontWeight.Bold, fontSize = 17.sp); Caption(detail) } }
 @Composable private fun RowScope.Nav(label: String, symbol: String, selected: Boolean, onClick: () -> Unit) = NavigationBarItem(selected, onClick, icon = { Text(symbol, fontSize = 20.sp) }, label = { Text(label) })

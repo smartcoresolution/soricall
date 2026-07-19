@@ -3,22 +3,18 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import EmergencyNotification, Guardian, RiskEvent
-
-
-class FcmPlaceholderService:
-    def send_guardian_alert(self, *, guardian_id: str, message: str) -> bool:
-        return bool(guardian_id and message)
+from app.models import DevicePushToken, EmergencyNotification, Guardian, RiskEvent
+from app.services.fcm_service import FcmService
 
 
 class NotificationService:
     def __init__(
         self,
         db: Session,
-        fcm_service: FcmPlaceholderService | None = None,
+        fcm_service: FcmService | None = None,
     ):
         self.db = db
-        self.fcm_service = fcm_service or FcmPlaceholderService()
+        self.fcm_service = fcm_service or FcmService()
 
     def notify_guardians_for_risk_event(
         self,
@@ -42,10 +38,23 @@ class NotificationService:
         notifications: list[EmergencyNotification] = []
 
         for guardian in guardians:
-            sent = self.fcm_service.send_guardian_alert(
-                guardian_id=guardian.id,
-                message=message,
+            tokens = list(
+                self.db.scalars(
+                    select(DevicePushToken).where(
+                        DevicePushToken.guardian_id == guardian.id,
+                        DevicePushToken.active.is_(True),
+                    )
+                )
             )
+            sent = False
+            for push_token in tokens:
+                result = self.fcm_service.send(
+                    token=push_token.token,
+                    title="가족 사칭 의심 전화",
+                    body=message,
+                    data={"risk_event_id": risk_event.id, "guardian_id": guardian.id},
+                )
+                sent = sent or result.sent
             notification = EmergencyNotification(
                 risk_event_id=risk_event_id,
                 guardian_id=guardian.id,

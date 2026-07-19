@@ -66,6 +66,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation("com.google.firebase:firebase-messaging-ktx:24.1.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

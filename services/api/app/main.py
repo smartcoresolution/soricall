@@ -2,6 +2,8 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
+from sqlalchemy import text
+import time
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -13,6 +15,7 @@ from app.api.v1 import (
     device_enrollments,
     emergency,
     face_video,
+    media_assets,
     families,
     risk_events,
     seniors,
@@ -21,6 +24,7 @@ from app.api.v1 import (
 from app.core.config import get_settings
 from app.core.database import SessionLocal, init_db
 from app.core.authorization import PROTECTED_PREFIXES, authenticate_request, authorized_for_request, current_user_id
+from app.core.operations import log_request, rate_limit_response, request_trace_id
 
 
 settings = get_settings()
@@ -38,6 +42,31 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def operations_and_security(request: Request, call_next):
+    trace_id = request_trace_id(request)
+    limited = rate_limit_response(request, trace_id)
+    if limited:
+        return limited
+    started = time.perf_counter()
+    response = await call_next(request)
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    response.headers["X-Request-ID"] = trace_id
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=()"
+    if settings.app_env == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    log_request(
+        trace_id=trace_id,
+        request=request,
+        status_code=response.status_code,
+        elapsed_ms=elapsed_ms,
+    )
+    return response
 
 if settings.app_env != "development":
     app.add_middleware(
@@ -108,6 +137,16 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": settings.service_name}
 
 
+@app.get("/ready", tags=["health"])
+def ready() -> dict[str, str]:
+    db = SessionLocal()
+    try:
+        db.execute(text("SELECT 1"))
+    finally:
+        db.close()
+    return {"status": "ready", "database": "ok"}
+
+
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(device_enrollments.family_router, prefix="/api/v1")
 app.include_router(device_enrollments.public_router, prefix="/api/v1")
@@ -118,8 +157,10 @@ app.include_router(calls.router, prefix="/api/v1")
 app.include_router(call_sessions.router, prefix="/api/v1")
 app.include_router(call_sessions.confirmation_router, prefix="/api/v1")
 app.include_router(call_sessions.push_router, prefix="/api/v1")
+app.include_router(call_sessions.device_push_router, prefix="/api/v1")
 app.include_router(risk_events.router, prefix="/api/v1")
 app.include_router(admin.router, prefix="/api/v1")
 app.include_router(emergency.router, prefix="/api/v1")
 app.include_router(voice_profiles.router, prefix="/api/v1")
 app.include_router(face_video.router, prefix="/api/v1")
+app.include_router(media_assets.router, prefix="/api/v1")

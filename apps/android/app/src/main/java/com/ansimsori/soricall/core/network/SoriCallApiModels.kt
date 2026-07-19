@@ -5,6 +5,8 @@ data class AuthSessionDto(
     val refreshToken: String,
     val userId: String,
     val displayName: String,
+    val familyId: String? = null,
+    val seniorId: String? = null,
 )
 
 data class ProtectedUserCreateDto(val name: String, val phoneNumber: String, val relationCode: String)
@@ -26,6 +28,12 @@ data class DeviceEnrollmentDto(
 data class PhoneVerificationDto(
     val verificationId: String,
     val developmentCode: String?,
+)
+
+data class ScreeningCacheDto(
+    val version: String,
+    val familyNumberHashes: Set<String>,
+    val riskNumberHashes: Set<String>,
 )
 
 data class RegisterRequestDto(

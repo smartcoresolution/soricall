@@ -34,6 +34,26 @@ class AIClient:
         self.timeout_seconds = timeout_seconds
 
     def enroll_voice(self, *, audio_ref: str) -> VoiceEnrollResult:
+        if get_settings().ai_provider == "remote":
+            try:
+                response = httpx.post(
+                    f"{self.base_url}/v1/voice/enroll",
+                    json={"audio_ref": audio_ref},
+                    timeout=self.timeout_seconds,
+                )
+                response.raise_for_status()
+                data = response.json()
+            except (httpx.HTTPError, ValueError) as exc:
+                raise RuntimeError("AI voice enrollment failed") from exc
+            model_name = str(data["model_name"])
+            if get_settings().app_env == "production" and model_name.startswith("mock-"):
+                raise RuntimeError("mock AI model is forbidden in production")
+            return VoiceEnrollResult(
+                embedding=str(data["embedding"]),
+                model_name=model_name,
+                model_version=str(data["model_version"]),
+                quality_score=float(data["quality_score"]),
+            )
         digest = hashlib.sha256(audio_ref.encode("utf-8")).digest()
         quality_score = 0.95 if "clean" in audio_ref.lower() else 0.82
         return VoiceEnrollResult(
@@ -66,6 +86,10 @@ class AIClient:
         except (httpx.HTTPError, ValueError) as exc:
             raise RuntimeError("AI voice analysis failed") from exc
 
+        model_version = str(data.get("model_version", "unknown"))
+        if get_settings().app_env == "production" and model_version.startswith("mock"):
+            raise RuntimeError("mock AI model is forbidden in production")
+
         return VoiceAnalyzeResult(
             speaker_similarity=float(data["speaker_similarity"]),
             speaker_matched=bool(data["speaker_matched"]),
@@ -75,5 +99,5 @@ class AIClient:
             text_confidence=float(data["text_confidence"]),
             content_risk_score=int(data["content_risk_score"]),
             content_reason_codes=list(data["content_reason_codes"]),
-            model_versions={"ai_service": str(data.get("model_version", "0.1.0"))},
+            model_versions={"ai_service": model_version},
         )

@@ -14,6 +14,8 @@ interface SoriCallApiContract {
     suspend fun completeDeviceEnrollment(token: String): DeviceEnrollmentDto
 
     suspend fun validateSenior(seniorId: String): Boolean
+    suspend fun getScreeningCache(seniorId: String): ScreeningCacheDto
+    suspend fun registerPushToken(token: String)
 
     suspend fun createCallSession(seniorId: String, phoneNumber: String): CallSessionResponseDto
 

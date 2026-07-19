@@ -27,7 +27,7 @@ class HttpSoriCallApi(
     }
 
     override suspend fun register(phoneNumber: String, verificationToken: String, password: String, displayName: String): AuthSessionDto = withContext(Dispatchers.IO) {
-        parseAuth(request("/api/v1/auth/register", JSONObject().put("phone_number", phoneNumber).put("verification_token", verificationToken).put("password", password).put("display_name", displayName).put("role", "GUARDIAN")))
+        parseAuth(request("/api/v1/auth/register", JSONObject().put("phone_number", phoneNumber).put("verification_token", verificationToken).put("password", password).put("display_name", displayName).put("role", "SENIOR")))
     }
 
     override suspend fun login(phoneNumber: String, password: String): AuthSessionDto = withContext(Dispatchers.IO) {
@@ -86,10 +86,38 @@ class HttpSoriCallApi(
 
     private fun parseAuth(json: JSONObject): AuthSessionDto {
         val user = json.getJSONObject("user")
-        return AuthSessionDto(json.getString("access_token"), json.getString("refresh_token"), user.getString("id"), user.getString("display_name"))
+        return AuthSessionDto(
+            json.getString("access_token"),
+            json.getString("refresh_token"),
+            user.getString("id"),
+            user.getString("display_name"),
+            json.optString("family_id").takeIf { it.isNotBlank() && it != "null" },
+            json.optString("senior_id").takeIf { it.isNotBlank() && it != "null" },
+        )
     }
     override suspend fun validateSenior(seniorId: String): Boolean = withContext(Dispatchers.IO) {
         runCatching { get("/api/v1/seniors/$seniorId").getString("id") == seniorId }.getOrDefault(false)
+    }
+
+    override suspend fun getScreeningCache(seniorId: String): ScreeningCacheDto = withContext(Dispatchers.IO) {
+        val json = get("/api/v1/seniors/$seniorId/screening-cache")
+        fun strings(name: String): Set<String> = json.getJSONArray(name).let { array ->
+            (0 until array.length()).map { array.getString(it) }.toSet()
+        }
+        ScreeningCacheDto(
+            version = json.getString("version"),
+            familyNumberHashes = strings("family_number_hashes"),
+            riskNumberHashes = strings("risk_number_hashes"),
+        )
+    }
+
+    override suspend fun registerPushToken(token: String) {
+        withContext(Dispatchers.IO) {
+            request(
+                "/api/v1/device-push-tokens",
+                JSONObject().put("token", token).put("platform", "ANDROID"),
+            )
+        }
     }
 
     override suspend fun createCallSession(seniorId: String, phoneNumber: String): CallSessionResponseDto =

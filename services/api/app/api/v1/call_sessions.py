@@ -18,6 +18,8 @@ from app.schemas import (
     ResponseActionResultResponse,
 )
 from app.models import DevicePushToken, Guardian, ResponseAction
+from app.core.authorization import current_user_id
+from sqlalchemy import select
 from datetime import datetime, timezone
 from app.services.call_analysis_service import CallAnalysisService
 from app.services.call_session_service import CallSessionService
@@ -28,6 +30,7 @@ from app.services.voice_call_analysis_service import VoiceCallAnalysisService
 router = APIRouter(prefix="/call-sessions", tags=["call-sessions"])
 confirmation_router = APIRouter(prefix="/family-confirmations", tags=["family-confirmations"])
 push_router = APIRouter(prefix="/guardians", tags=["push-notifications"])
+device_push_router = APIRouter(prefix="/device-push-tokens", tags=["push-notifications"])
 
 
 @router.post("", response_model=CallSessionCreateResponse, status_code=status.HTTP_201_CREATED)
@@ -213,6 +216,41 @@ def register_push_token(guardian_id: str, request: PushTokenRegister, db: DbSess
     db.commit()
     db.refresh(token)
     return token
+
+
+@device_push_router.post("", response_model=PushTokenResponse)
+def register_current_user_push_tokens(
+    request: PushTokenRegister,
+    db: DbSession,
+) -> DevicePushToken:
+    user_id = current_user_id.get()
+    if not user_id:
+        raise HTTPException(status_code=401, detail="authentication required")
+    guardians = list(db.scalars(select(Guardian).where(Guardian.user_id == user_id)))
+    if not guardians:
+        raise HTTPException(status_code=409, detail="current user has no guardian assignment")
+
+    existing = db.scalar(select(DevicePushToken).where(DevicePushToken.token == request.token))
+    target_guardian_ids = {guardian.id for guardian in guardians}
+    if existing:
+        if existing.guardian_id not in target_guardian_ids:
+            raise HTTPException(status_code=409, detail="push token belongs to another user")
+        existing.platform = request.platform
+        existing.active = True
+        tokens = [existing]
+    else:
+        tokens = [
+            DevicePushToken(guardian_id=guardian.id, token=request.token, platform=request.platform)
+            for guardian in guardians
+        ]
+        # The token column is intentionally unique. A single installation is
+        # therefore associated with the user's first guardian assignment.
+        tokens = tokens[:1]
+        db.add_all(tokens)
+    db.commit()
+    for token in tokens:
+        db.refresh(token)
+    return tokens[0]
 
 
 @router.post(

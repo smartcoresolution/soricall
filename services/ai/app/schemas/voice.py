@@ -32,3 +32,4 @@ class VoiceAnalyzeResponse(BaseModel):
     risk_level: str
     reason_codes: list[str]
     message_for_senior: str
+    model_version: str = "mock-pipeline-0.1.0"
