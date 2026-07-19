@@ -23,6 +23,9 @@ from app.schemas import (
     DeviceVerificationConfirmRequest,
     DeviceVerificationRequest,
     PhoneVerificationSendResponse,
+    DirectLivenessResponse,
+    DirectLivenessVerify,
+    DirectLivenessVerifyResponse,
     SafeWordResponse,
     SafeWordUpsert,
     SafeWordVerifyRequest,
@@ -291,9 +294,15 @@ def create_enrollment_invitation(
     member.approval_status = "INVITED"
     member.is_verified = False
     db.add(invitation)
+    db.flush()
+    enrollment_url = (
+        f"/soricall/enroll?qr_invitation_id={invitation.id}&qr_nonce={token}"
+        if channel == "QR"
+        else delivery.enrollment_url
+    )
     db.commit()
     db.refresh(invitation)
-    return _invitation_response(invitation, member, delivery.enrollment_url)
+    return _invitation_response(invitation, member, enrollment_url)
 
 
 @router.get("/{family_id}/enrollment-invitations", response_model=list[EnrollmentInvitationResponse])
@@ -328,10 +337,19 @@ def resend_enrollment_invitation(family_id: str, invitation_id: str, db: DbSessi
     return _invitation_response(invitation, member, delivery.enrollment_url)
 
 
-def _invitation_for_token(token: str, db: DbSession) -> tuple[EnrollmentInvitation, FamilyMember]:
+def _invitation_for_token(
+    token: str,
+    db: DbSession,
+    *,
+    qr_invitation_id: str | None = None,
+) -> tuple[EnrollmentInvitation, FamilyMember]:
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     invitation = db.scalar(select(EnrollmentInvitation).where(EnrollmentInvitation.token_hash == token_hash))
     if not invitation:
+        raise HTTPException(status_code=404, detail="invitation not found")
+    if qr_invitation_id is not None and (
+        invitation.id != qr_invitation_id or invitation.channel != "QR"
+    ):
         raise HTTPException(status_code=404, detail="invitation not found")
     member = db.get(FamilyMember, invitation.family_member_id)
     if not member:
@@ -344,9 +362,50 @@ def _invitation_for_token(token: str, db: DbSession) -> tuple[EnrollmentInvitati
 
 
 @enrollment_router.get("/resolve", response_model=EnrollmentInvitationResponse)
-def resolve_enrollment_invitation(token: str, db: DbSession) -> EnrollmentInvitationResponse:
-    invitation, member = _invitation_for_token(token, db)
+def resolve_enrollment_invitation(
+    token: str,
+    db: DbSession,
+    qr_invitation_id: str | None = None,
+) -> EnrollmentInvitationResponse:
+    invitation, member = _invitation_for_token(token, db, qr_invitation_id=qr_invitation_id)
     return _invitation_response(invitation, member)
+
+
+@enrollment_router.post("/direct/liveness", response_model=DirectLivenessResponse)
+def create_direct_liveness(token: str, db: DbSession) -> DirectLivenessResponse:
+    invitation, _ = _invitation_for_token(token, db)
+    if invitation.channel != "DIRECT":
+        raise HTTPException(status_code=400, detail="direct enrollment required")
+    now = datetime.now(timezone.utc)
+    invitation.liveness_action = secrets.choice(["BLINK_TWICE", "TURN_LEFT", "TURN_RIGHT"])
+    invitation.liveness_expires_at = now + timedelta(minutes=2)
+    invitation.liveness_verified_at = None
+    db.commit()
+    return DirectLivenessResponse(
+        invitation_id=invitation.id,
+        action=invitation.liveness_action,
+        expires_at=invitation.liveness_expires_at,
+    )
+
+
+@enrollment_router.post("/direct/liveness/verify", response_model=DirectLivenessVerifyResponse)
+def verify_direct_liveness(
+    token: str, request: DirectLivenessVerify, db: DbSession
+) -> DirectLivenessVerifyResponse:
+    invitation, _ = _invitation_for_token(token, db)
+    now = datetime.now(timezone.utc)
+    expires_at = invitation.liveness_expires_at
+    if not expires_at or expires_at.replace(tzinfo=expires_at.tzinfo or timezone.utc) <= now:
+        raise HTTPException(status_code=410, detail="liveness challenge expired")
+    if invitation.liveness_action not in request.observed_actions:
+        raise HTTPException(status_code=400, detail="liveness action not observed")
+    invitation.liveness_verified_at = now
+    invitation.liveness_action = None
+    invitation.liveness_expires_at = None
+    db.commit()
+    return DirectLivenessVerifyResponse(
+        invitation_id=invitation.id, verified=True, verified_at=now
+    )
 
 
 @enrollment_router.post(
@@ -358,10 +417,13 @@ def send_enrollment_phone_verification(
     token: str,
     request: DeviceVerificationRequest,
     db: DbSession,
+    qr_invitation_id: str | None = None,
 ) -> PhoneVerificationSendResponse:
-    invitation, member = _invitation_for_token(token, db)
+    invitation, member = _invitation_for_token(token, db, qr_invitation_id=qr_invitation_id)
     if invitation.status == "EXPIRED":
         raise HTTPException(status_code=410, detail="invitation expired")
+    if invitation.channel == "QR" and not invitation.device_verified_at:
+        raise HTTPException(status_code=403, detail="QR device verification required")
     if hash_phone_number(request.phone_number) != member.phone_number_hash:
         raise HTTPException(status_code=400, detail="phone number does not match invited family member")
     code = f"{secrets.randbelow(1_000_000):06d}"
@@ -387,8 +449,9 @@ def confirm_enrollment_phone_verification(
     token: str,
     request: DeviceVerificationConfirmRequest,
     db: DbSession,
+    qr_invitation_id: str | None = None,
 ) -> EnrollmentInvitationResponse:
-    invitation, member = _invitation_for_token(token, db)
+    invitation, member = _invitation_for_token(token, db, qr_invitation_id=qr_invitation_id)
     verification = db.get(PhoneVerification, request.verification_id)
     now = datetime.now(timezone.utc)
     if not verification or verification.purpose != f"ENROLLMENT_INVITE:{invitation.id}":
@@ -418,8 +481,9 @@ def complete_enrollment_invitation(
     token: str,
     request: EnrollmentCompleteRequest,
     db: DbSession,
+    qr_invitation_id: str | None = None,
 ) -> EnrollmentInvitationResponse:
-    invitation, member = _invitation_for_token(token, db)
+    invitation, member = _invitation_for_token(token, db, qr_invitation_id=qr_invitation_id)
     if invitation.status == "EXPIRED":
         raise HTTPException(status_code=410, detail="invitation expired")
     if invitation.status == "COMPLETED":
@@ -434,6 +498,8 @@ def complete_enrollment_invitation(
             db.commit()
             raise HTTPException(status_code=409, detail="QR invitation already used")
         return _invitation_response(invitation, member)
+    if invitation.channel == "DIRECT" and not invitation.liveness_verified_at:
+        raise HTTPException(status_code=409, detail="direct liveness verification required")
     if not invitation.phone_verified_at:
         raise HTTPException(status_code=400, detail="invited family phone verification required")
     if not request.consent_accepted:
@@ -488,6 +554,8 @@ def complete_enrollment_invitation(
     invitation.status = "COMPLETED"
     invitation.used_at = datetime.now(timezone.utc)
     invitation.completed_at = datetime.now(timezone.utc)
+    invitation.liveness_action = None
+    invitation.liveness_expires_at = None
     member.approval_status = "REVIEW_REQUIRED"
     member.trust_level = "B"
     member.is_verified = False

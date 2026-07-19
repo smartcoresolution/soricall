@@ -234,6 +234,10 @@ class MediaImportValidate(BaseModel):
     data_url: str = Field(min_length=1)
 
 
+class MediaImportConsent(BaseModel):
+    accepted: bool
+
+
 class MediaImportSessionResponse(BaseModel):
     id: str
     family_id: str
@@ -246,9 +250,70 @@ class MediaImportSessionResponse(BaseModel):
     status: str
     trust_level: str
     failure_code: str | None
+    quality_status: str
+    phone_verified_at: datetime | None
+    consented_at: datetime | None
     expires_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class DeviceKeyRegister(BaseModel):
+    device_id: str = Field(min_length=1, max_length=100)
+    public_key_der_b64: str = Field(min_length=1)
+    algorithm: str = Field(default="ECDSA_P256_SHA256", pattern="^ECDSA_P256_SHA256$")
+
+
+class DeviceKeyResponse(BaseModel):
+    id: str
+    device_id: str
+    algorithm: str
+    fingerprint: str
+    active: bool
+
+    model_config = {"from_attributes": True}
+
+
+class QrChallengeCreate(BaseModel):
+    invitation_id: str
+    nonce: str = Field(min_length=20)
+    device_key_id: str
+
+
+class QrChallengeResponse(BaseModel):
+    challenge_id: str
+    invitation_id: str
+    challenge: str
+    expires_at: datetime
+
+
+class QrChallengeVerify(BaseModel):
+    challenge: str = Field(min_length=20)
+    signature_b64: str = Field(min_length=1)
+
+
+class QrChallengeVerifyResponse(BaseModel):
+    invitation_id: str
+    device_key_id: str
+    verified: bool
+    verified_at: datetime
+
+
+class DirectLivenessResponse(BaseModel):
+    invitation_id: str
+    action: str
+    expires_at: datetime
+
+
+class DirectLivenessVerify(BaseModel):
+    observed_actions: list[str] = Field(min_length=1)
+    capture_duration_ms: int = Field(ge=2000, le=30000)
+
+
+class DirectLivenessVerifyResponse(BaseModel):
+    invitation_id: str
+    verified: bool
+    verified_at: datetime
 
 
 class SafeWordUpsert(BaseModel):

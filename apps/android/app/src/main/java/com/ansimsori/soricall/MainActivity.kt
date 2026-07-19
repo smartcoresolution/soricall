@@ -100,12 +100,12 @@ class MainActivity : ComponentActivity() {
     @Suppress("DEPRECATION")
     private fun captureSharedMedia(intent: Intent) {
         if (intent.action !in setOf(Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE)) return
-        val uri = if (intent.action == Intent.ACTION_SEND) {
-            intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)
+        val uris = if (intent.action == Intent.ACTION_SEND) {
+            listOfNotNull(intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM))
         } else {
-            intent.getParcelableArrayListExtra<android.net.Uri>(Intent.EXTRA_STREAM)?.firstOrNull()
+            intent.getParcelableArrayListExtra<android.net.Uri>(Intent.EXTRA_STREAM).orEmpty()
         }
-        uri?.let {
+        uris.forEach {
             runCatching {
                 contentResolver.takePersistableUriPermission(
                     it,
@@ -450,7 +450,18 @@ private fun ConfirmationContactScreen(onNext: (String, String, String, Boolean) 
 }
 
 @Composable
-private fun BiometricsScreen(onDone: () -> Unit) = FormPage("3 / 3", "가족의 목소리를 등록해 주세요", "등록 가족의 목소리와 의심전화 목소리를 비교합니다.") {
+private fun BiometricsScreen(onDone: () -> Unit) {
+    val context = LocalContext.current
+    val application = context.applicationContext as SoriCallApplication
+    var importedUris by remember { mutableStateOf(application.pendingSharedMedia().toList()) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        uris.forEach { uri ->
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            application.savePendingSharedMedia(uri.toString(), context.contentResolver.getType(uri))
+        }
+        importedUris = application.pendingSharedMedia().toList()
+    }
+    FormPage("3 / 3", "가족의 목소리를 등록해 주세요", "등록 가족의 목소리와 의심전화 목소리를 비교합니다.") {
     PersonCard("김민지", "딸 · 음성 등록 필요")
     CardBox {
         StatusIcon("●", TealSoft, Teal, 68)
@@ -462,7 +473,18 @@ private fun BiometricsScreen(onDone: () -> Unit) = FormPage("3 / 3", "가족의 
         PrimaryButton("🎙 녹음 시작", {})
     }
     OutlinedFullButton("▣ 얼굴정보 등록하기 · 선택", {})
+    OutlinedFullButton("받은 음성·사진 파일 가져오기") {
+        picker.launch(arrayOf("audio/*", "image/*"))
+    }
+    if (importedUris.isNotEmpty()) {
+        InfoCard("가져올 자료 ${importedUris.size}개", "선택한 자료는 서버 검증을 통과하기 전까지 가족정보로 활성화되지 않습니다.")
+        TextButtonLine("선택한 자료 모두 취소") {
+            application.clearPendingSharedMedia()
+            importedUris = emptyList()
+        }
+    }
     PrimaryButton("등록 완료", onDone)
+    }
 }
 
 @Composable

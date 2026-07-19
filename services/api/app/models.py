@@ -154,7 +154,40 @@ class EnrollmentInvitation(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     phone_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    device_key_id: Mapped[str | None] = mapped_column(GUID(), ForeignKey("device_keys.id"))
+    device_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    liveness_action: Mapped[str | None] = mapped_column(String(30))
+    liveness_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    liveness_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DeviceKey(Base):
+    __tablename__ = "device_keys"
+
+    id: Mapped[str] = mapped_column(GUID(), primary_key=True, default=new_uuid)
+    user_id: Mapped[str] = mapped_column(GUID(), ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    device_id: Mapped[str] = mapped_column(String(100), index=True)
+    algorithm: Mapped[str] = mapped_column(String(30), default="ECDSA_P256_SHA256")
+    public_key_der_b64: Mapped[str] = mapped_column(Text)
+    fingerprint: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class EnrollmentQrChallenge(Base):
+    __tablename__ = "enrollment_qr_challenges"
+
+    id: Mapped[str] = mapped_column(GUID(), primary_key=True, default=new_uuid)
+    invitation_id: Mapped[str] = mapped_column(
+        GUID(), ForeignKey("enrollment_invitations.id", ondelete="CASCADE"), index=True
+    )
+    device_key_id: Mapped[str] = mapped_column(GUID(), ForeignKey("device_keys.id"), index=True)
+    challenge_hash: Mapped[str] = mapped_column(String(64))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -173,8 +206,12 @@ class MediaImportSession(Base):
     status: Mapped[str] = mapped_column(String(30), default="PENDING_UPLOAD")
     trust_level: Mapped[str] = mapped_column(String(1), default="D")
     failure_code: Mapped[str | None] = mapped_column(String(50))
+    quality_status: Mapped[str] = mapped_column(String(30), default="PENDING")
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    phone_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consented_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

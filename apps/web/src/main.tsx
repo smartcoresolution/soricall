@@ -86,8 +86,12 @@ function userMessage(error: unknown): string {
 const isValidMobilePhone = (value: string) => /^01[016789]-?\d{3,4}-?\d{4}$/.test(value.trim());
 
 function App() {
-  const enrollmentToken = new URLSearchParams(window.location.search).get("token");
   const query = new URLSearchParams(window.location.search);
+  const qrInvitationId = query.get("qr_invitation_id");
+  const enrollmentToken = query.get("token") ?? query.get("qr_nonce");
+  const enrollmentQuery = enrollmentToken
+    ? `token=${encodeURIComponent(enrollmentToken)}${qrInvitationId ? `&qr_invitation_id=${encodeURIComponent(qrInvitationId)}` : ""}`
+    : "";
   const tokenFromLink = query.get("device_token");
   if (tokenFromLink) window.localStorage.setItem("soricall_device_enrollment_token", tokenFromLink);
   const deviceToken = tokenFromLink ?? (query.get("resume_device_enrollment") === "1"
@@ -153,7 +157,7 @@ function App() {
     if (!enrollmentToken) return;
     setApiAccessToken(null);
     setBusy(true);
-    apiGet<EnrollmentInvitation>(`/api/v1/enrollment-invitations/resolve?token=${encodeURIComponent(enrollmentToken)}`)
+    apiGet<EnrollmentInvitation>(`/api/v1/enrollment-invitations/resolve?${enrollmentQuery}`)
       .then((invitation) => {
         setEnrollmentContact({ id: invitation.family_member_id, name: invitation.family_member_name });
         if (invitation.status === "COMPLETED") setScreen("enrollmentComplete");
@@ -162,7 +166,7 @@ function App() {
       })
       .catch((error) => setApiError(userMessage(error)))
       .finally(() => setBusy(false));
-  }, [enrollmentToken]);
+  }, [enrollmentToken, enrollmentQuery]);
 
   useEffect(() => {
     if (enrollmentToken) return;
@@ -536,7 +540,7 @@ function App() {
   const sendInvitePhoneCode = () => runApi(async () => {
     if (!enrollmentToken) throw new Error("초대 정보가 없습니다.");
     const sent = await apiPost<{ verification_id: string; development_code?: string | null }>(
-      `/api/v1/enrollment-invitations/phone-verification?token=${encodeURIComponent(enrollmentToken)}`,
+      `/api/v1/enrollment-invitations/phone-verification?${enrollmentQuery}`,
       { phone_number: invitePhone },
     );
     setInviteVerificationId(sent.verification_id);
@@ -546,7 +550,7 @@ function App() {
   const confirmInvitePhoneCode = () => runApi(async () => {
     if (!enrollmentToken) throw new Error("초대 정보가 없습니다.");
     await apiPost(
-      `/api/v1/enrollment-invitations/phone-verification/confirm?token=${encodeURIComponent(enrollmentToken)}`,
+      `/api/v1/enrollment-invitations/phone-verification/confirm?${enrollmentQuery}`,
       { verification_id: inviteVerificationId, code: inviteVerificationCode },
     );
     setScreen("biometrics");
@@ -554,7 +558,7 @@ function App() {
   const saveBiometrics = (audioRef: string, durationMs: number, faceImageRef: string | null) => runApi(async () => {
     if (!enrollmentContact) throw new Error("음성을 등록할 확인 가족 정보가 없습니다.");
     if (enrollmentToken) {
-      await apiPost<EnrollmentInvitation>(`/api/v1/enrollment-invitations/complete?token=${encodeURIComponent(enrollmentToken)}`, {
+      await apiPost<EnrollmentInvitation>(`/api/v1/enrollment-invitations/complete?${enrollmentQuery}`, {
         audio_ref: audioRef,
         duration_ms: durationMs,
         mime_type: "audio/webm",

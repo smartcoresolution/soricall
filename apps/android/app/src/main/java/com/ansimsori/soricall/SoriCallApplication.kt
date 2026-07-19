@@ -33,10 +33,18 @@ class SoriCallApplication : Application() {
     }
 
     fun savePendingSharedMedia(uri: String, mimeType: String?) {
+        val current = preferences.getStringSet("pending_shared_media_uris", emptySet()).orEmpty()
         preferences.edit()
-            .putString("pending_shared_media_uri", uri)
+            .putStringSet("pending_shared_media_uris", current + uri)
             .putString("pending_shared_media_mime", mimeType)
             .apply()
+    }
+
+    fun pendingSharedMedia(): Set<String> =
+        preferences.getStringSet("pending_shared_media_uris", emptySet()).orEmpty()
+
+    fun clearPendingSharedMedia() {
+        preferences.edit().remove("pending_shared_media_uris").remove("pending_shared_media_mime").apply()
     }
 
     fun accessToken(): String? = preferences.getString("access_token", null)

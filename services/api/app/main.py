@@ -16,6 +16,7 @@ from app.api.v1 import (
     emergency,
     face_video,
     media_assets,
+    qr_enrollment,
     families,
     risk_events,
     seniors,
@@ -164,3 +165,5 @@ app.include_router(emergency.router, prefix="/api/v1")
 app.include_router(voice_profiles.router, prefix="/api/v1")
 app.include_router(face_video.router, prefix="/api/v1")
 app.include_router(media_assets.router, prefix="/api/v1")
+app.include_router(qr_enrollment.device_router, prefix="/api/v1")
+app.include_router(qr_enrollment.qr_router, prefix="/api/v1")

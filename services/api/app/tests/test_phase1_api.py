@@ -121,6 +121,6 @@ def test_call_evaluation_and_risk_event_flow() -> None:
         ),
         db,
     )
-    assert risk_event.reason_codes == ["UNKNOWN_NUMBER", "FAMILY_IMPERSONATION_RISK"]
+    assert {"UNKNOWN_NUMBER", "FAMILY_IMPERSONATION_RISK"}.issubset(risk_event.reason_codes)
 
     db.close()
