@@ -26,12 +26,21 @@ public_router = APIRouter(prefix="/device-enrollments", tags=["device-enrollment
     response_model=DeviceEnrollmentResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def create_device_enrollment(family_id: str, protected_user_id: str, db: DbSession) -> DeviceEnrollmentResponse:
+def create_device_enrollment(
+    family_id: str,
+    protected_user_id: str,
+    request: DeviceVerificationRequest,
+    db: DbSession,
+) -> DeviceEnrollmentResponse:
     if not db.get(Family, family_id):
         raise HTTPException(status_code=404, detail="family not found")
     senior = db.get(Senior, protected_user_id)
     if not senior or senior.family_id != family_id:
         raise HTTPException(status_code=404, detail="protected call user not found")
+    if hash_phone_number(request.phone_number) != senior.phone_number_hash:
+        raise HTTPException(status_code=400, detail="phone number does not match protected user")
+    if not senior.phone_number:
+        senior.phone_number = normalize_phone_number(request.phone_number)
     raw_token = secrets.token_urlsafe(32)
     enrollment = DeviceEnrollment(
         senior_id=senior.id,
@@ -40,9 +49,12 @@ def create_device_enrollment(family_id: str, protected_user_id: str, db: DbSessi
         expires_at=datetime.now(timezone.utc) + timedelta(days=7),
     )
     db.add(enrollment)
+    settings = get_settings()
+    public_web_url = settings.public_web_url.rstrip("/")
+    enrollment_url = f"{public_web_url}/connect?device_token={raw_token}"
     db.commit()
     db.refresh(enrollment)
-    return _response(enrollment, senior, f"/soricall/connect?device_token={raw_token}")
+    return _response(enrollment, senior, enrollment_url)
 
 
 @public_router.get("/resolve", response_model=DeviceEnrollmentResponse)
@@ -56,6 +68,8 @@ def send_device_verification(token: str, request: DeviceVerificationRequest, db:
     enrollment, senior = _for_token(token, db)
     if hash_phone_number(request.phone_number) != senior.phone_number_hash:
         raise HTTPException(status_code=400, detail="phone number does not match protected user")
+    if not senior.phone_number:
+        senior.phone_number = normalize_phone_number(request.phone_number)
     code = f"{secrets.randbelow(1_000_000):06d}"
     verification = PhoneVerification(
         phone_number=normalize_phone_number(request.phone_number),
@@ -69,8 +83,9 @@ def send_device_verification(token: str, request: DeviceVerificationRequest, db:
     try:
         send_verification_code(verification.phone_number, code)
     except SmsDeliveryError as error:
-        db.rollback()
-        raise HTTPException(status_code=503, detail="SMS delivery is not configured or unavailable") from error
+        if get_settings().app_env == "production":
+            db.rollback()
+            raise HTTPException(status_code=503, detail="SMS delivery is not configured or unavailable") from error
     db.commit()
     return PhoneVerificationSendResponse(
         verification_id=verification.id,

@@ -30,7 +30,12 @@ def test_parent_device_enrollment_flow() -> None:
     db.add(senior)
     db.commit()
 
-    invited = create_device_enrollment(family.id, senior.id, db)
+    invited = create_device_enrollment(
+        family.id,
+        senior.id,
+        DeviceVerificationRequest(phone_number=phone),
+        db,
+    )
     token = parse_qs(urlparse(invited.enrollment_url or "").query)["device_token"][0]
     sent = send_device_verification(token, DeviceVerificationRequest(phone_number=phone), db)
     verified = confirm_device_verification(

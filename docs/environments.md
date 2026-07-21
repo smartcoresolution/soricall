@@ -59,3 +59,15 @@ Production safety:
 - `JWT_SECRET` must not be the default placeholder.
 - Raw voice samples remain disabled by default.
 - FCM and storage settings must be replaced with real production values.
+# Database isolation
+
+SoriCall uses the same PostgreSQL engine and schema workflow in development and
+production. Each environment remains physically isolated:
+
+- development: `soricall-postgres-dev` and `soricall_pg_data_dev`
+- production: `soricall-postgres-prod` and `soricall_pg_data_prod`
+- automated tests: isolated SQLite file under `/tmp`
+
+`DATABASE_URL` is mandatory. The API refuses SQLite when `APP_ENV` is
+`development` or `production`, preventing the working-directory-dependent
+`soricall.db` files that previously split registrations across databases.

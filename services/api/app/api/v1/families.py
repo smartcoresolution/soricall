@@ -131,6 +131,7 @@ def create_protected_call_user(
         member_type="PROTECTED_CALL_USER",
         relation_code=request.relation_code,
         protection_status="PREPARING",
+        phone_number=normalize_phone_number(request.phone_number),
         phone_number_hash=hash_phone_number(request.phone_number),
         phone_number_last4=phone_last4(request.phone_number),
     )

@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_env: str = "development"
     service_name: str = "soricall-api"
-    database_url: str = "sqlite:///./soricall.db"
+    database_url: str
     ai_service_url: str = "http://localhost:8100"
     ai_provider: str = "mock"
     fcm_project_id: str | None = None
@@ -22,8 +22,7 @@ class Settings(BaseSettings):
     sms_webhook_url: str | None = None
     sms_webhook_bearer_token: str | None = None
     sms_sender: str | None = None
-    solapi_api_key: str | None = None
-    solapi_api_secret: str | None = None
+    public_web_url: str = "https://www.ansimsori.ai/soricall"
     device_access_token_expire_days: int = 365
     cors_origins: str = (
         "http://localhost:5173,http://127.0.0.1:5173,"
@@ -38,12 +37,10 @@ class Settings(BaseSettings):
     def validate_production_secrets(self) -> "Settings":
         if self.app_env == "production" and self.jwt_secret == "change-me-in-production":
             raise ValueError("JWT_SECRET must be changed in production")
-        if self.app_env == "production" and self.database_url.startswith("sqlite"):
-            raise ValueError("production DATABASE_URL must use a managed database")
-        if self.app_env == "production" and (
-            not self.fcm_project_id or not self.fcm_access_token
+        if self.app_env in {"development", "production"} and not self.database_url.startswith(
+            ("postgresql://", "postgresql+psycopg://")
         ):
-            raise ValueError("FCM credentials must be configured in production")
+            raise ValueError(f"{self.app_env} DATABASE_URL must use PostgreSQL")
         if self.app_env == "production" and self.ai_provider != "remote":
             raise ValueError("AI_PROVIDER must be remote in production")
         return self

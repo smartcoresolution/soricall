@@ -37,9 +37,10 @@ def upgrade() -> None:
         """
         UPDATE family_members
         SET protected_user_id = (
-            SELECT MIN(seniors.id)
+            SELECT seniors.id
             FROM seniors
             WHERE seniors.family_id = family_members.family_id
+            LIMIT 1
         )
         WHERE member_type = 'FAMILY_CONFIRMATION_CONTACT'
           AND protected_user_id IS NULL

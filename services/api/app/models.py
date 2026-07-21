@@ -534,7 +534,9 @@ class ConsentLog(Base):
     consent_type: Mapped[str] = mapped_column(String(50))
     version: Mapped[str] = mapped_column(String(30))
     accepted: Mapped[bool] = mapped_column(Boolean)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        "accepted_at", DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class AuditLog(Base):

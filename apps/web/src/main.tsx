@@ -3,9 +3,9 @@ import ReactDOM from "react-dom/client";
 import QRCode from "qrcode";
 import {
   Activity, AlertTriangle, ArrowLeft, Bell, Check, CheckCircle2, ChevronRight,
-  CircleUserRound, Clock3, Download, FileClock, HeartHandshake, Home, LockKeyhole, Mic,
-  Pause, Phone, PhoneCall, PhoneOff, Play, Plus, Settings, Shield, ShieldAlert,
-  Trash2, UserPlus, UserRoundCheck, Users, Video, Volume2, X,
+  CircleUserRound, ClipboardList, Clock3, Database, Download, FileClock, FileText, HeartHandshake, Home, LayoutDashboard, LockKeyhole, Mic,
+  Pause, Phone, PhoneCall, PhoneOff, Play, Plus, Shield, ShieldAlert,
+  Search, Trash2, UserPlus, UserRoundCheck, Users, Video, Volume2, X,
 } from "lucide-react";
 import { apiDelete, apiGet, apiPost, setApiAccessToken, type Family, type UserPublic } from "./api";
 import "./styles.css";
@@ -14,7 +14,7 @@ import "./feedback.css";
 type Screen =
   | "welcome" | "parentConnect" | "setupChoice" | "selfPhone" | "signup" | "consent" | "signupComplete" | "login" | "home" | "protected"
   | "contacts" | "deviceInvite" | "registrationPlan" | "invite" | "enrollmentStatus" | "enrollmentVerify" | "biometrics" | "normal" | "analysis" | "blocked"
-  | "faceRegistration" | "parentAppInstall" | "enrollmentComplete" | "confirm" | "history" | "admin";
+  | "faceRegistration" | "parentAppInstall" | "enrollmentComplete" | "confirm" | "history" | "adminLogin" | "admin";
 
 const familyRelations = ["친할아버지", "친할머니", "외할아버지", "외할머니", "아버지", "어머니", "배우자의 아버지", "배우자의 어머니", "기타"];
 const contactRelations = ["아들", "딸", "손자", "손녀", "배우자", "기타 가족"];
@@ -27,8 +27,15 @@ const protectedRelationCodes: Record<string, string> = {
 const contactRelationCodes: Record<string, string> = { 아들: "SON", 딸: "DAUGHTER", 손자: "GRANDSON", 손녀: "GRANDDAUGHTER", 배우자: "SPOUSE", "기타 가족": "OTHER" };
 
 type AuthResponse = { access_token: string; refresh_token: string; user: UserPublic; family_id?: string | null; senior_id?: string | null };
-type ProtectedUserResponse = { id: string; name?: string; relation_code?: string; phone_number_last4?: string | null; protection_status?: string };
-type RegisteredProtectedFamily = { id: string; name: string; relation: string; phoneLast4: string; status?: string };
+type ProtectedUserResponse = { id: string; name?: string; relation_code?: string; phone_number?: string | null; phone_number_last4?: string | null; protection_status?: string };
+type RegisteredProtectedFamily = {
+  id: string;
+  name: string;
+  relation: string;
+  phoneLast4: string;
+  phoneNumber?: string;
+  status?: string;
+};
 type ConfirmationContactResponse = { id: string; name: string; relation_code?: string | null; phone_number_last4?: string | null; approval_status?: string; trust_level?: string };
 type FamilyMemberView = { id: string; name: string; relation: string | null };
 type VoiceProfileCreated = { id: string; status?: string };
@@ -49,9 +56,15 @@ type EnrollmentInvitation = {
   member_trust_level: string;
   phone_verified: boolean;
   requested_assets: string[];
+  voice_deleted?: boolean;
+  face_deleted?: boolean;
 };
 type DeviceEnrollment = { id: string; protected_user_id: string; protected_user_name: string; phone_number_last4: string | null; status: string; enrollment_url: string | null };
+type AdminRow = Record<string, unknown> & { id?: string };
+type AdminOverview = { metrics: Record<string, number>; seniors: AdminRow[]; family_members: AdminRow[]; calls: AdminRow[]; actions: AdminRow[]; confirmations: AdminRow[]; notifications: AdminRow[]; consents: AdminRow[]; admins: AdminRow[]; audits: AdminRow[] };
+const emptyAdminOverview = (): AdminOverview => ({ metrics: {}, seniors: [], family_members: [], calls: [], actions: [], confirmations: [], notifications: [], consents: [], admins: [], audits: [] });
 const SESSION_STORAGE_KEY = "soricall.dev.session";
+const ADMIN_SESSION_STORAGE_KEY = "soricall.admin.session";
 type SetupMode = "self" | "helper";
 const protectedRelationLabels = Object.fromEntries(Object.entries(protectedRelationCodes).map(([label, code]) => [code, label]));
 
@@ -70,10 +83,22 @@ function storedSession(): AuthResponse | null {
   }
 }
 
+function storedAdminSession(): AuthResponse | null {
+  try {
+    const value = sessionStorage.getItem(ADMIN_SESSION_STORAGE_KEY);
+    const saved = value ? JSON.parse(value) as AuthResponse : null;
+    return saved?.user.role === "ADMIN" ? saved : null;
+  } catch {
+    sessionStorage.removeItem(ADMIN_SESSION_STORAGE_KEY);
+    return null;
+  }
+}
+
 function userMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : "";
   if (message === "phone number already registered") return "이미 가입된 휴대전화 번호입니다.";
   if (message === "invalid phone number or password") return "휴대전화 번호 또는 비밀번호가 올바르지 않습니다.";
+  if (message === "invalid admin credentials") return "관리자 ID 또는 비밀번호가 올바르지 않습니다.";
   if (message === "invalid phone verification code") return "인증번호가 올바르지 않습니다.";
   if (message === "phone verification expired") return "인증번호 유효시간이 지났습니다. 다시 받아 주세요.";
   if (message === "authentication required") return "로그인이 필요합니다.";
@@ -85,25 +110,10 @@ function userMessage(error: unknown): string {
 
 const isValidMobilePhone = (value: string) => /^01[016789]-?\d{3,4}-?\d{4}$/.test(value.trim());
 
-async function copyText(value: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(value);
-    return true;
-  } catch {
-    const textarea = document.createElement("textarea");
-    textarea.value = value;
-    textarea.setAttribute("readonly", "");
-    textarea.style.position = "fixed";
-    textarea.style.opacity = "0";
-    document.body.appendChild(textarea);
-    textarea.select();
-    const copied = document.execCommand("copy");
-    textarea.remove();
-    return copied;
-  }
-}
-
 function App() {
+  const isAdminPath = /\/admin(?:\/login)?\/?$/.test(window.location.pathname);
+  const initialAdminSession = isAdminPath ? storedAdminSession() : null;
+  if (initialAdminSession) setApiAccessToken(initialAdminSession.access_token);
   const query = new URLSearchParams(window.location.search);
   const qrInvitationId = query.get("qr_invitation_id");
   const enrollmentToken = query.get("token") ?? query.get("qr_nonce");
@@ -118,7 +128,7 @@ function App() {
   const missingResumeToken = query.get("resume_device_enrollment") === "1" && !deviceToken;
   const sessionRestoreStartedRef = useRef(false);
   const newSignupStartedRef = useRef(false);
-  const [screen, setScreen] = useState<Screen>(deviceToken ? "parentConnect" : enrollmentToken ? "enrollmentVerify" : "welcome");
+  const [screen, setScreen] = useState<Screen>(isAdminPath ? (initialAdminSession ? "admin" : "adminLogin") : deviceToken ? "parentConnect" : enrollmentToken ? "enrollmentVerify" : "welcome");
   const [setupMode, setSetupMode] = useState<SetupMode>("helper");
   const [protectedRelation, setProtectedRelation] = useState("아버지");
   const [contactRelation, setContactRelation] = useState("딸");
@@ -126,10 +136,11 @@ function App() {
   const [analysisStep, setAnalysisStep] = useState(2);
   const [signup, setSignup] = useState({ name: "", phone: "", verificationId: "", verificationCode: "", verificationToken: "", password: "", passwordConfirm: "" });
   const [login, setLogin] = useState({ phone_number: "", password: "" });
+  const [adminLogin, setAdminLogin] = useState({ admin_id: "", password: "" });
   const [protectedForm, setProtectedForm] = useState({ name: "", phone: "" });
   const [protectedFamilies, setProtectedFamilies] = useState<RegisteredProtectedFamily[]>([]);
   const [contactForm, setContactForm] = useState({ name: "", phone: "", primary: true });
-  const [session, setSession] = useState<AuthResponse | null>(null);
+  const [session, setSession] = useState<AuthResponse | null>(initialAdminSession);
   const [familyId, setFamilyId] = useState<string | null>(null);
   const [protectedUserId, setProtectedUserId] = useState<string | null>(null);
   const [enrollmentContact, setEnrollmentContact] = useState<ConfirmationContactResponse | null>(null);
@@ -167,6 +178,7 @@ function App() {
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, {
         scope: import.meta.env.BASE_URL,
+        updateViaCache: "none",
       }).catch(() => undefined);
     }
   }, []);
@@ -187,7 +199,7 @@ function App() {
   }, [enrollmentToken, enrollmentQuery]);
 
   useEffect(() => {
-    if (enrollmentToken) return;
+    if (enrollmentToken || isAdminPath) return;
     if (sessionRestoreStartedRef.current) return;
     sessionRestoreStartedRef.current = true;
     const saved = storedSession();
@@ -206,7 +218,7 @@ function App() {
         setApiAccessToken(null);
       })
       .finally(() => setBusy(false));
-  }, [enrollmentToken]);
+  }, [enrollmentToken, isAdminPath]);
 
   useEffect(() => {
     if (!session || enrollmentToken) return;
@@ -234,6 +246,7 @@ function App() {
           name: item.name ?? "보호 가족",
           relation: protectedRelationLabels[item.relation_code ?? ""] ?? "기타",
           phoneLast4: item.phone_number_last4 ?? "----",
+          phoneNumber: item.phone_number ?? undefined,
           status: item.protection_status,
         })));
         setEnrollmentContacts(contacts);
@@ -264,11 +277,12 @@ function App() {
   useEffect(() => {
     if (screen !== "parentAppInstall" || !familyId || !session) return;
     const reload = () => apiGet<ProtectedUserResponse[]>(`/api/v1/families/${familyId}/protected-call-users`).then((users) => {
-      setProtectedFamilies(users.map((item) => ({
+      setProtectedFamilies((current) => users.map((item) => ({
         id: item.id,
         name: item.name ?? "보호 가족",
         relation: protectedRelationLabels[item.relation_code ?? ""] ?? "기타",
         phoneLast4: item.phone_number_last4 ?? "----",
+        phoneNumber: item.phone_number ?? current.find((existing) => existing.id === item.id)?.phoneNumber,
         status: item.protection_status,
       })));
     }).catch(() => undefined);
@@ -338,6 +352,24 @@ function App() {
     setApiAccessToken(auth.access_token); persistSession(auth); setSession(auth);
     setScreen("setupChoice");
   });
+  const signInAdmin = () => runApi(async () => {
+    const auth = await apiPost<AuthResponse>("/api/v1/auth/admin/login", adminLogin);
+    if (auth.user.role !== "ADMIN") throw new Error("관리자 권한이 없는 계정입니다.");
+    sessionStorage.setItem(ADMIN_SESSION_STORAGE_KEY, JSON.stringify(auth));
+    setApiAccessToken(auth.access_token);
+    setSession(auth);
+    window.history.replaceState({}, "", `${import.meta.env.BASE_URL}admin`);
+    setScreen("admin");
+  });
+  const signOutAdmin = () => {
+    sessionStorage.removeItem(ADMIN_SESSION_STORAGE_KEY);
+    setApiAccessToken(null);
+    setSession(null);
+    setAdminLogin({ admin_id: "", password: "" });
+    setApiError("");
+    window.history.replaceState({}, "", `${import.meta.env.BASE_URL}admin/login`);
+    setScreen("adminLogin");
+  };
   const openNextRegistrationStep = async (member: { id: string; name: string }) => {
     setEnrollmentContact(member);
     const [voiceProfiles, faceProfiles] = await Promise.all([
@@ -371,6 +403,7 @@ function App() {
       name: item.name ?? "보호 가족",
       relation: protectedRelationLabels[item.relation_code ?? ""] ?? "기타",
       phoneLast4: item.phone_number_last4 ?? "----",
+      phoneNumber: item.phone_number ?? undefined,
       status: item.protection_status,
     })));
     const members = await apiGet<FamilyMemberView[]>(`/api/v1/families/${currentFamilyId}/members`);
@@ -449,6 +482,7 @@ function App() {
       name: protectedForm.name.trim(),
       relation: protectedRelation,
       phoneLast4: protectedForm.phone.replace(/\D/g, "").slice(-4),
+      phoneNumber: protectedForm.phone,
       status: "PREPARING",
     }]);
     setProtectedForm({ name: "", phone: "" });
@@ -503,8 +537,26 @@ function App() {
       if (!familyId || !protectedUserId) throw new Error("가족 정보가 없습니다.");
       await apiDelete(`/api/v1/families/${familyId}/protected-call-users/${protectedUserId}/confirmation-contacts/${contact.id}`);
       setEnrollmentContacts((current) => current.filter((item) => item.id !== contact.id));
+      setInvitations((current) => current.filter((item) => item.family_member_id !== contact.id));
       if (enrollmentContact?.id === contact.id) setEnrollmentContact(null);
       setApiMessage(`${contact.name}님을 확인 가족에서 삭제했습니다.`);
+    });
+  };
+  const removeRegisteredAsset = (invitation: EnrollmentInvitation, asset: "voice" | "face") => {
+    const label = asset === "voice" ? "음성" : "얼굴";
+    if (!window.confirm(`${invitation.family_member_name}님의 ${label} 등록정보를 삭제할까요? 삭제 후 다시 등록할 수 있습니다.`)) return;
+    void runApi(async () => {
+      const profiles = asset === "voice"
+        ? await apiGet<VoiceProfileCreated[]>(`/api/v1/voice-profiles?family_member_id=${encodeURIComponent(invitation.family_member_id)}`)
+        : await apiGet<FaceProfileView[]>(`/api/v1/face-profiles?family_member_id=${encodeURIComponent(invitation.family_member_id)}`);
+      const activeProfiles = profiles.filter((profile) => profile.status !== "DELETED");
+      await Promise.all(activeProfiles.map((profile) => apiDelete(
+        asset === "voice" ? `/api/v1/voice-profiles/${profile.id}` : `/api/v1/face-profiles/${profile.id}`,
+      )));
+      setInvitations((current) => current.map((item) => item.id === invitation.id
+        ? { ...item, [asset === "voice" ? "voice_deleted" : "face_deleted"]: true }
+        : item));
+      setApiMessage(`${invitation.family_member_name}님의 ${label} 등록정보를 삭제했습니다.`);
     });
   };
   const sendEnrollmentInvitations = (channel: "LINK" | "QR" | "DIRECT" = "LINK") => runApi(async () => {
@@ -622,41 +674,26 @@ function App() {
   });
   const shareParentInstall = async (family: RegisteredProtectedFamily) => {
     if (!familyId) throw new Error("가족 정보가 없습니다.");
-    const enrollment = await apiPost<DeviceEnrollment>(`/api/v1/families/${familyId}/protected-call-users/${family.id}/device-enrollment`, {});
-    const connectionUrl = new URL(enrollment.enrollment_url ?? "", window.location.origin).toString();
-    const apkUrl = new URL(`${import.meta.env.BASE_URL}downloads/soricall.apk`, window.location.origin).toString();
-    const message = `${family.name}님, SoriCall APK를 설치한 뒤 이 메시지의 연결 링크를 다시 눌러 휴대전화 번호 인증과 권한 설정을 완료해 주세요.\n\n연결 링크: ${connectionUrl}`;
-    const linkShareData = {
-      title: "SoriCall 통화 보호 앱 설치",
-      text: message,
-      url: apkUrl,
-    };
-    const copyInstallGuide = async () => {
-      const copied = await copyText(`${message}\n\nAPK 다운로드: ${apkUrl}`);
-      if (copied) setApiMessage("APK 다운로드 주소와 연결 안내를 복사했습니다. 문자나 카카오톡에 붙여 넣어 주세요.");
-      else setApiError(`설치 안내를 복사하지 못했습니다. APK 주소를 직접 전달해 주세요: ${apkUrl}`);
-    };
-    try {
-      if (navigator.share && navigator.canShare) {
-        const response = await fetch(apkUrl);
-        if (!response.ok) throw new Error("APK download failed");
-        const apkFile = new File([await response.blob()], "SoriCall.apk", {
-          type: "application/vnd.android.package-archive",
-        });
-        const fileShareData: ShareData = { title: linkShareData.title, text: message, files: [apkFile] };
-        if (navigator.canShare(fileShareData)) {
-          await navigator.share(fileShareData);
-          return;
-        }
-      }
-      if (navigator.share
-        && (typeof navigator.canShare !== "function" || navigator.canShare(linkShareData))) {
-        await navigator.share(linkShareData);
-      } else await copyInstallGuide();
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") return;
-      await copyInstallGuide();
-    }
+    const phone = family.phoneNumber ?? window.prompt(
+      `${family.name}님의 등록된 휴대전화 번호 전체를 입력해 주세요. (끝 ${family.phoneLast4})`,
+      "010-",
+    );
+    if (phone === null) return;
+    if (!isValidMobilePhone(phone)) throw new Error("올바른 휴대전화 번호를 입력해 주세요.");
+    const enrollment = await apiPost<DeviceEnrollment>(
+      `/api/v1/families/${familyId}/protected-call-users/${family.id}/device-enrollment`,
+      { phone_number: phone },
+    );
+    const connectionUrl = enrollment.enrollment_url ?? "";
+    if (!connectionUrl) throw new Error("연결 링크를 만들지 못했습니다.");
+    const message = [
+      `[SoriCall] ${family.name}님 통화 보호 연결 안내`,
+      "아래 링크를 눌러 앱 설치와 연결을 순서대로 진행해 주세요.",
+      connectionUrl,
+    ].join("\n");
+    const recipient = phone.replace(/\D/g, "");
+    setApiMessage("문자 앱을 열었습니다. 내용을 확인하고 전송 버튼을 눌러 주세요.");
+    window.location.href = `sms:${recipient}?body=${encodeURIComponent(message)}`;
   };
   const openFamilyEnrollment = (invitation: EnrollmentInvitation) => {
     if (!invitation.enrollment_url) throw new Error("사용 가능한 개발용 등록 링크가 없습니다.");
@@ -668,7 +705,7 @@ function App() {
     protected: "가족 등록", contacts: "확인 가족 등록", deviceInvite: "부모님 앱 연결", registrationPlan: "등록 항목 안내", invite: "등록 요청 보내기",
     enrollmentStatus: "가족 등록 현황", enrollmentVerify: "초대 가족 본인 확인", biometrics: setupMode === "helper" ? "자녀 음성 등록" : "가족 본인 등록", faceRegistration: "얼굴 등록", parentAppInstall: "부모님 앱 설치", enrollmentComplete: "등록 완료", normal: "안전한 전화", analysis: "의심전화 분석",
     blocked: "고위험 전화 차단", confirm: "가족 확인 요청", history: "통화기록",
-    admin: "관리자 페이지", home: "통화 보호 홈", welcome: "",
+    adminLogin: "관리자 로그인", admin: "관리자 페이지", home: "통화 보호 홈", welcome: "",
   }[screen]), [screen]);
 
   const goBack = () => {
@@ -706,6 +743,14 @@ function App() {
     setScreen("welcome");
   };
 
+  if (screen === "adminLogin") {
+    return <AdminLoginPage value={adminLogin} setValue={setAdminLogin} error={apiError} busy={busy} onSubmit={signInAdmin} onService={() => { window.location.href = import.meta.env.BASE_URL; }} />;
+  }
+
+  if (screen === "admin") {
+    return <div className="admin-desktop-shell"><main className="admin-desktop-main"><AdminPage isAdmin={session?.user.role === "ADMIN"} adminName={session?.user.display_name || "관리자"} onLogout={signOutAdmin}/></main></div>;
+  }
+
   return (
     <div className="site-shell">
       {screen !== "welcome" && <header className="topbar">
@@ -738,7 +783,7 @@ function App() {
         {screen === "deviceInvite" && <DeviceInvite familyName={protectedForm.name} link={parentInstallLink} onNext={() => setScreen("contacts")} />}
         {screen === "registrationPlan" && <RegistrationPlan contacts={enrollmentContacts} onNext={() => setScreen("invite")} />}
         {screen === "invite" && <EnrollmentInvite contacts={enrollmentContacts} onSend={sendEnrollmentInvitations} />}
-        {screen === "enrollmentStatus" && <EnrollmentStatus invitations={invitations} onResend={resendInvitation} onOpen={openFamilyEnrollment} onCopy={copyEnrollmentLink} onShare={shareEnrollmentLink} onApprove={approveEnrollment} onHome={() => setScreen("home")} />}
+        {screen === "enrollmentStatus" && <EnrollmentStatus invitations={invitations} onResend={resendInvitation} onOpen={openFamilyEnrollment} onCopy={copyEnrollmentLink} onShare={shareEnrollmentLink} onApprove={approveEnrollment} onDeleteAsset={removeRegisteredAsset} onDeleteFamily={(invitation) => removeContact({ id: invitation.family_member_id, name: invitation.family_member_name })} onHome={() => setScreen("home")} />}
         {screen === "enrollmentVerify" && <EnrollmentPhoneVerification phone={invitePhone} setPhone={setInvitePhone} verificationId={inviteVerificationId} code={inviteVerificationCode} setCode={setInviteVerificationCode} busy={busy} onSend={sendInvitePhoneCode} onConfirm={confirmInvitePhoneCode} />}
         {screen === "biometrics" && enrollmentContact && <Biometrics contactName={enrollmentContact.name} protectedFamilies={protectedFamilies} onManageTargets={() => setScreen("protected")} onDone={saveBiometrics} />}
         {screen === "faceRegistration" && enrollmentContact && <FaceRegistration contactName={enrollmentContact.name} onDone={saveFaceRegistration} />}
@@ -750,7 +795,6 @@ function App() {
         {screen === "blocked" && <BlockedCall onConfirm={() => setScreen("confirm")} />}
         {screen === "confirm" && <Confirmation onDone={() => setScreen("history")} />}
         {screen === "history" && <HistoryPage />}
-        {screen === "admin" && <AdminPage />}
       </main>
       {screen !== "signupComplete" && ((busy && screen !== "consent" && screen !== "protected" && screen !== "setupChoice" && screen !== "login") || apiMessage || (apiError && screen !== "consent" && screen !== "login")) && <div className={`api-feedback ${apiError ? "error" : ""}`} role={apiError ? "alert" : "status"} aria-live={apiError ? "assertive" : "polite"} aria-atomic="true">{busy ? "안전하게 저장하고 있습니다…" : apiError || apiMessage}<button onClick={() => { setApiError(""); setApiMessage(""); }} aria-label="알림 닫기"><X /></button></div>}
 
@@ -759,7 +803,6 @@ function App() {
           <NavItem active={screen === "home"} icon={<Home />} label="홈" onClick={() => setScreen("home")} />
           <NavItem active={screen === "protected" || screen === "contacts"} icon={<Users />} label="가족" onClick={() => setScreen("protected")} />
           <NavItem active={screen === "history"} icon={<FileClock />} label="기록" onClick={() => setScreen("history")} />
-          <NavItem active={screen === "admin"} icon={<Settings />} label="관리" onClick={() => setScreen("admin")} />
         </nav>
       )}
     </div>
@@ -840,6 +883,12 @@ function SignupComplete({ onNext }: { onNext: () => void }) {
 
 function Login({ value, setValue, onNext, error, onClearError }: { value:{phone_number:string;password:string}; setValue:React.Dispatch<React.SetStateAction<typeof value>>; onNext: () => void; error: string; onClearError: () => void }) { return <FormCard title="다시 만나서 반가워요" description="등록한 휴대전화 번호로 로그인해 주세요.">{error && <div className="login-error" role="alert"><div><b>{error}</b><p>입력한 휴대전화 번호와 비밀번호를 다시 확인해 주세요.<br/>비밀번호가 기억나지 않으면 ‘비밀번호 찾기’를 이용하고, 가입하지 않았다면 회원가입을 진행해 주세요.</p></div><button onClick={onClearError} aria-label="로그인 오류 닫기"><X /></button></div>}<Field label="휴대전화 번호" placeholder="010-0000-0000" type="tel" value={value.phone_number} onChange={phone_number => { onClearError(); setValue(v => ({...v,phone_number})); }}/><Field label="비밀번호" placeholder="비밀번호" type="password" value={value.password} onChange={password => { onClearError(); setValue(v => ({...v,password})); }}/><div className="between"><label><input type="checkbox"/> 로그인 유지</label><button className="link">비밀번호 찾기</button></div><button className="primary full" disabled={!isValidMobilePhone(value.phone_number) || !value.password} onClick={onNext}>로그인</button></FormCard>; }
 
+function AdminLoginPage({ value, setValue, error, busy, onSubmit, onService }: { value: { admin_id: string; password: string }; setValue: React.Dispatch<React.SetStateAction<{ admin_id: string; password: string }>>; error: string; busy: boolean; onSubmit: () => void; onService: () => void }) {
+  const valid = Boolean(value.admin_id.trim() && value.password.length >= 8);
+  const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => { if (event.key === "Enter" && valid) onSubmit(); };
+  return <div className="admin-login-shell"><div className="admin-login-panel"><section className="admin-login-brand"><span className="admin-login-logo"><Shield/></span><p>SORICALL OPERATIONS</p><h1>가족의 안전을 지키는<br/>서비스 운영 센터</h1><span>통화 보호 현황과 위험 이벤트를 확인하고<br/>위험번호 데이터를 안전하게 관리합니다.</span><div className="admin-login-features"><div><Activity/><b>실시간 운영 현황</b><small>통화 분석과 보호 단말 상태</small></div><div><ShieldAlert/><b>위험정보 관리</b><small>위험 이벤트와 번호 관리</small></div></div></section><section className="admin-login-form"><span className="eyebrow">ADMIN ONLY</span><h2>SoriCall Admin</h2><p>관리자 콘솔 전용 로그인</p><label><span>Admin ID</span><div><CircleUserRound/><input autoFocus autoComplete="username" placeholder="Admin ID" value={value.admin_id} onChange={(event) => setValue((current) => ({ ...current, admin_id: event.target.value }))} onKeyDown={onKeyDown}/></div></label><label><span>Password</span><div><LockKeyhole/><input type="password" autoComplete="current-password" placeholder="Password" value={value.password} onChange={(event) => setValue((current) => ({ ...current, password: event.target.value }))} onKeyDown={onKeyDown}/></div></label>{error && <div className="admin-login-error" role="alert"><AlertTriangle/>{error}</div>}<button className="primary full" disabled={busy || !valid} onClick={onSubmit}>{busy ? "관리자 권한 확인 중…" : "관리자 콘솔 입장"}</button><button className="admin-service-link" onClick={onService}>서비스 화면으로 나가기</button><small className="admin-security-note"><Shield/> 관리자 콘솔의 개인정보 및 음성 데이터 접근은 운영 로그 기록 대상입니다.</small></section></div></div>;
+}
+
 function FamilyRegistration({ value, setValue, relation, setRelation, families, onAdd, onDelete, onNext, busy }: { value:{name:string;phone:string}; setValue:React.Dispatch<React.SetStateAction<typeof value>>; relation: string; setRelation: (v: string) => void; families: RegisteredProtectedFamily[]; onAdd: () => void; onDelete: (family: RegisteredProtectedFamily) => void; onNext: () => void; busy: boolean }) { const valid = Boolean(value.name.trim()) && isValidMobilePhone(value.phone); return <FormCard step="보호할 가족 등록" title="누구의 전화를 보호할까요?" description="부모님과 조부모님 등 여러 명을 한 명씩 추가할 수 있습니다.">
   <label className="section-label">나와의 관계</label><RelationGrid options={familyRelations} value={relation} setValue={setRelation}/><Field label="성함" placeholder="예: 김영희" value={value.name} onChange={name => setValue(v => ({...v,name}))}/><Field label="휴대전화 번호" placeholder="010-0000-0000" type="tel" value={value.phone} onChange={phone => setValue(v => ({...v,phone}))}/>{value.phone && !isValidMobilePhone(value.phone) && <span className="validation-error">올바른 휴대전화 번호를 입력해 주세요.</span>}
   <button className="secondary full" disabled={busy || !valid} onClick={onAdd}><Plus /> 이 가족 추가하기</button>
@@ -879,10 +928,10 @@ function EnrollmentInvite({ contacts, onSend }: { contacts: ConfirmationContactR
   </FormCard>;
 }
 
-function EnrollmentStatus({ invitations, onResend, onOpen, onCopy, onShare, onApprove, onHome }: { invitations: EnrollmentInvitation[]; onResend: (id: string) => void; onOpen: (invitation: EnrollmentInvitation) => void; onCopy: (invitation: EnrollmentInvitation) => void; onShare: (invitation: EnrollmentInvitation) => void; onApprove: (invitation: EnrollmentInvitation) => void; onHome: () => void }) {
+function EnrollmentStatus({ invitations, onResend, onOpen, onCopy, onShare, onApprove, onDeleteAsset, onDeleteFamily, onHome }: { invitations: EnrollmentInvitation[]; onResend: (id: string) => void; onOpen: (invitation: EnrollmentInvitation) => void; onCopy: (invitation: EnrollmentInvitation) => void; onShare: (invitation: EnrollmentInvitation) => void; onApprove: (invitation: EnrollmentInvitation) => void; onDeleteAsset: (invitation: EnrollmentInvitation, asset: "voice" | "face") => void; onDeleteFamily: (invitation: EnrollmentInvitation) => void; onHome: () => void }) {
   const labels: Record<string, string> = { PENDING: "응답 대기", COMPLETED: "자료 도착", EXPIRED: "링크 만료" };
   return <FormCard title="가족 등록 현황" description="가족별 음성·얼굴 등록 진행 상태를 확인할 수 있습니다.">
-    <div className="enrollment-list">{invitations.map((invitation) => { const approval = invitation.member_approval_status ?? (invitation.status === "COMPLETED" ? "REVIEW_REQUIRED" : "INVITED"); return <div className="enrollment-person status" key={invitation.id}><span className="person-icon">{invitation.family_member_name.slice(0, 1)}</span><span><b>{invitation.family_member_name}</b><small>휴대전화 끝 {invitation.phone_number_last4 ?? "----"} · 신뢰등급 {invitation.member_trust_level ?? "D"} · {invitation.channel}</small>{invitation.enrollment_url && <code className="development-link">{new URL(invitation.enrollment_url, window.location.origin).toString()}</code>}</span>{invitation.channel === "QR" && invitation.enrollment_url && invitation.status === "PENDING" && <EnrollmentQr url={new URL(invitation.enrollment_url, window.location.origin).toString()} name={invitation.family_member_name} />}<em className={approval.toLowerCase()}>{approval === "ACTIVE" ? "승인 완료" : labels[invitation.status] ?? invitation.status}</em>{approval === "REVIEW_REQUIRED" ? <button className="primary" onClick={() => onApprove(invitation)}>이 가족이 맞습니다</button> : invitation.status !== "COMPLETED" && <>{invitation.enrollment_url && <><button className="link" onClick={() => onShare(invitation)}>공유하기</button><button className="link" onClick={() => onCopy(invitation)}>링크 복사</button><button className="link" onClick={() => onOpen(invitation)}>새 창에서 열기</button></>}<button className="link" onClick={() => onResend(invitation.id)}>링크 재발급</button></>}</div>; })}</div>
+    <div className="enrollment-list">{invitations.map((invitation) => { const approval = invitation.member_approval_status ?? (invitation.status === "COMPLETED" ? "REVIEW_REQUIRED" : "INVITED"); return <div className="enrollment-person status" key={invitation.id}><span className="person-icon">{invitation.family_member_name.slice(0, 1)}</span><span><b>{invitation.family_member_name}</b><small>휴대전화 끝 {invitation.phone_number_last4 ?? "----"} · 신뢰등급 {invitation.member_trust_level ?? "D"} · {invitation.channel}</small>{invitation.enrollment_url && <code className="development-link">{new URL(invitation.enrollment_url, window.location.origin).toString()}</code>}</span>{invitation.channel === "QR" && invitation.enrollment_url && invitation.status === "PENDING" && <EnrollmentQr url={new URL(invitation.enrollment_url, window.location.origin).toString()} name={invitation.family_member_name} />}<em className={approval.toLowerCase()}>{approval === "ACTIVE" ? "승인 완료" : labels[invitation.status] ?? invitation.status}</em>{approval === "REVIEW_REQUIRED" ? <button className="primary" onClick={() => onApprove(invitation)}>이 가족이 맞습니다</button> : invitation.status !== "COMPLETED" && <>{invitation.enrollment_url && <><button className="link" onClick={() => onShare(invitation)}>공유하기</button><button className="link" onClick={() => onCopy(invitation)}>링크 복사</button><button className="link" onClick={() => onOpen(invitation)}>새 창에서 열기</button></>}<button className="link" onClick={() => onResend(invitation.id)}>링크 재발급</button></>}{invitation.status === "COMPLETED" && <div className="registered-delete-actions"><button disabled={invitation.voice_deleted} onClick={() => onDeleteAsset(invitation, "voice")}><Trash2 /> {invitation.voice_deleted ? "음성 삭제됨" : "음성 삭제"}</button><button disabled={invitation.face_deleted} onClick={() => onDeleteAsset(invitation, "face")}><Trash2 /> {invitation.face_deleted ? "얼굴 삭제됨" : "얼굴 삭제"}</button></div>}<button className="delete-family-button" onClick={() => onDeleteFamily(invitation)}><Trash2 /> 가족 삭제</button></div>; })}</div>
     <InfoBox icon={<Bell />}><b>개발환경에서는 링크를 직접 전달해 등록 흐름을 확인합니다.</b><br/>실제 SMS 발송은 운영 전달 제공자를 연결한 뒤 활성화합니다.</InfoBox>
     <button className="primary full" onClick={onHome}>안심 홈으로 이동</button>
   </FormCard>;
@@ -1135,7 +1184,78 @@ function Confirmation({ onDone }: { onDone: () => void }) { return <CallStage to
 
 function HistoryPage() { return <div className="content-wide"><div className="page-heading"><span className="eyebrow">통화 보호 기록</span><h1>최근 통화를 확인하세요</h1><p>민감한 통화내용은 기본적으로 숨겨지며 보존기간 후 자동 삭제됩니다.</p></div><div className="filter-row"><button className="active">전체 16</button><button>안전 12</button><button>주의 2</button><button>차단 2</button></div><section className="history-table"><div className="table-head"><span>상태</span><span>통화 정보</span><span>판단 근거</span><span>가족 확인</span><span>시간</span></div><HistoryRow tone="safe" status="안전" call="김민지 · 딸" reason="등록 가족 번호 일치" confirm="확인 불필요" time="오늘 09:41"/><HistoryRow tone="warn" status="주의" call="번호 끝 8821" reason="미등록 번호 · 유사 음성" confirm="전화했음" time="어제 15:18"/><HistoryRow tone="danger" status="차단" call="번호 끝 4402" reason="합성음 · 송금 요구" confirm="전화하지 않음" time="7월 12일"/></section></div>; }
 
-function AdminPage() { return <div className="content-wide"><div className="page-heading admin-heading"><div><span className="eyebrow">SoriCall Admin</span><h1>서비스 운영 현황</h1><p>개인정보 원본은 노출하지 않고 운영 상태와 감사 기록만 제공합니다.</p></div><span className="status-pill"><i/> 모든 시스템 정상</span></div><section className="stat-grid admin-stats"><Stat icon={<CircleUserRound/>} value="1,284" label="통화 보호 사용자"/><Stat icon={<Activity/>} value="8,420" label="이번 달 분석 통화"/><Stat icon={<ShieldAlert/>} value="327" label="위험 통화 감지" tone="orange"/><Stat icon={<PhoneOff/>} value="86" label="고위험 차단" tone="red"/></section><section className="admin-grid"><div className="admin-card"><h3>서비스 상태</h3><SystemRow label="업무 API" value="정상"/><SystemRow label="AI 음성 분석" value="정상"/><SystemRow label="가족 알림 FCM" value="지연 2건" warn/><SystemRow label="Android 단말" value="1,118대 연결"/></div><div className="admin-card"><h3>오늘의 위험등급</h3><div className="donut"><span><b>241</b>분석 통화</span></div><div className="legend"><span><i className="green"/>안전 73%</span><span><i className="yellow"/>주의 18%</span><span><i className="red"/>위험 9%</span></div></div><div className="admin-card wide"><h3>최근 운영 알림</h3><CallRow tone="warn" icon={<Bell/>} title="FCM 알림 재시도 2건" meta="5분 전 · 자동 재시도 대기" badge="확인"/><CallRow tone="safe" icon={<Check/>} title="개인정보 자동 파기 완료" meta="오늘 02:00 · 184건" badge="완료"/></div></section></div>; }
+type AdminTab = "dashboard" | "seniors" | "family" | "auth" | "calls" | "actions" | "confirmations" | "incidents" | "consents" | "disposals" | "reports" | "admins" | "audits";
+type AdminMenuGroup = { id: string; label: string; icon: React.ReactNode; tab?: AdminTab; children?: { id: AdminTab; label: string }[] };
+const adminMenuGroups: AdminMenuGroup[] = [
+  { id: "dashboard", label: "대시보드", icon: <LayoutDashboard/>, tab: "dashboard" },
+  { id: "users", label: "사용자 관리", icon: <Users/>, children: [{id:"seniors",label:"어르신 사용자"},{id:"family",label:"가족 사용자"}] },
+  { id: "auth", label: "가족 인증정보 관리", icon: <Mic/>, tab: "auth" },
+  { id: "security", label: "통화 보안 관리", icon: <ShieldAlert/>, children: [{id:"calls",label:"통화 분석 이력"},{id:"actions",label:"경고·차단·알림 이력"},{id:"confirmations",label:"가족 확인 응답"}] },
+  { id: "incidents", label: "신고·사건 관리", icon: <AlertTriangle/>, tab: "incidents" },
+  { id: "privacy", label: "개인정보 관리", icon: <Database/>, children: [{id:"consents",label:"동의 현황"},{id:"disposals",label:"철회·파기 이력"}] },
+  { id: "reports", label: "통계·보고서", icon: <FileText/>, tab: "reports" },
+  { id: "system", label: "시스템 관리", icon: <LockKeyhole/>, children: [{id:"admins",label:"관리자 계정·권한"},{id:"audits",label:"보안감사 로그"}] },
+];
+const adminTabLabel = Object.fromEntries(adminMenuGroups.flatMap(group => group.tab ? [[group.tab, group.label]] : (group.children ?? []).map(item => [item.id, item.label]))) as Record<AdminTab,string>;
+
+const adminValue = (value: unknown) => value == null || value === "" ? "-" : typeof value === "boolean" ? (value ? "예" : "아니요") : Array.isArray(value) ? value.join(", ") : String(value);
+const formatAdminDate = (value: unknown) => value ? new Date(String(value)).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }) : "-";
+
+function AdminDataTable({ rows, columns, query, onSelect }: { rows: AdminRow[]; columns: { key: string; label: string; date?: boolean }[]; query: string; onSelect: (row: AdminRow) => void }) {
+  const filtered = rows.filter((row) => JSON.stringify(row).toLowerCase().includes(query.toLowerCase()));
+  return <div className="admin-data-table"><div className="admin-data-head">{columns.map((column) => <span key={column.key}>{column.label}</span>)}</div>{filtered.length ? filtered.slice(0, 200).map((row, index) => <button className="admin-data-row" key={row.id ?? index} style={{gridTemplateColumns:`repeat(${columns.length}, minmax(120px, 1fr))`}} onClick={() => onSelect(row)}>{columns.map((column) => <span key={column.key}>{column.date ? formatAdminDate(row[column.key]) : adminValue(row[column.key])}</span>)}</button>) : <p className="empty-state">조회 결과가 없습니다.</p>}</div>;
+}
+
+function AdminPage({ isAdmin, adminName, onLogout }: { isAdmin: boolean; adminName: string; onLogout: () => void }) {
+  const [data, setData] = useState<AdminOverview | null>(null);
+  const [tab, setTab] = useState<AdminTab>("dashboard");
+  const [expandedGroups, setExpandedGroups] = useState<string[]>(["users", "security", "privacy", "system"]);
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<AdminRow | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const load = async () => { if (!isAdmin) return; setLoading(true); try { setData(await apiGet<AdminOverview>("/api/v1/admin/overview")); setError(""); } catch (reason) { if (reason instanceof Error && reason.message === "Request failed with 404") { setData(emptyAdminOverview()); setError(""); } else setError(userMessage(reason)); } finally { setLoading(false); } };
+  useEffect(() => { void load(); }, [isAdmin]);
+  if (!isAdmin) return <div className="admin-access-denied"><LockKeyhole/><h1>관리자 전용 페이지입니다</h1><p>관리자 계정으로 다시 로그인해 주세요.</p></div>;
+  const config: Record<Exclude<AdminTab, "dashboard" | "reports">, { title: string; description: string; rows: AdminRow[]; columns: { key: string; label: string; date?: boolean }[] }> = {
+    seniors: { title: "어르신 사용자", description: "보호 대상의 가입·단말·보호 활성 상태를 확인합니다.", rows: data?.seniors ?? [], columns: [{key:"id",label:"사용자 번호"},{key:"name",label:"성명"},{key:"phone",label:"휴대전화"},{key:"protection_status",label:"보호 상태"},{key:"device_status",label:"단말 상태"},{key:"family_count",label:"등록 가족"},{key:"created_at",label:"가입일",date:true}] },
+    family: { title: "가족 사용자", description: "가족 관계, 본인인증과 어르신 연결 상태를 조회합니다.", rows: data?.family_members ?? [], columns: [{key:"id",label:"가족 번호"},{key:"name",label:"성명"},{key:"relation",label:"관계"},{key:"phone",label:"휴대전화"},{key:"verified",label:"본인인증"},{key:"connection_status",label:"연결 상태"},{key:"trust_level",label:"신뢰등급"}] },
+    auth: { title: "가족 인증정보 등록상태", description: "원본을 열람하지 않고 음성·얼굴 특징정보와 품질 상태만 확인합니다.", rows: data?.family_members ?? [], columns: [{key:"name",label:"가족"},{key:"voice_status",label:"음성 등록"},{key:"voice_samples",label:"샘플 수"},{key:"voice_duration_ms",label:"녹음 길이(ms)"},{key:"voice_quality",label:"음성 품질"},{key:"face_status",label:"얼굴 등록"},{key:"face_quality",label:"얼굴 품질"},{key:"consent",label:"동의"}] },
+    calls: { title: "통화 분석·위험 판정 이력", description: "특허 처리 단계의 분석 결과와 최종 조치를 사건번호로 추적합니다.", rows: data?.calls ?? [], columns: [{key:"id",label:"사건번호"},{key:"started_at",label:"통화 시각",date:true},{key:"senior",label:"어르신"},{key:"caller",label:"발신번호"},{key:"speaker_similarity",label:"음성 유사도"},{key:"spoof_probability",label:"합성 의심도"},{key:"risk_score",label:"위험점수"},{key:"risk_level",label:"등급"},{key:"action",label:"최종 조치"}] },
+    actions: { title: "경고·차단·알림 이력", description: "위험 판정 이후 조치의 성공·실패 결과를 확인합니다.", rows: [...(data?.actions ?? []), ...(data?.notifications ?? [])], columns: [{key:"case_id",label:"사건번호"},{key:"type",label:"조치 유형"},{key:"status",label:"상태"},{key:"failure_reason",label:"실패 사유"},{key:"requested_at",label:"요청 시각",date:true},{key:"executed_at",label:"처리 시각",date:true}] },
+    confirmations: { title: "가족 확인 응답", description: "미응답 요청과 가족 응답 이후 시스템 조치를 점검합니다.", rows: data?.confirmations ?? [], columns: [{key:"case_id",label:"사건번호"},{key:"channel",label:"확인 방법"},{key:"status",label:"상태"},{key:"response",label:"응답 결과"},{key:"requested_at",label:"요청 시각",date:true},{key:"responded_at",label:"응답 시각",date:true}] },
+    incidents: { title: "신고·사건 관리", description: "실제 위험·오탐·미탐으로 분류할 통화 사건을 추적합니다.", rows: (data?.calls ?? []).filter(row => ["HIGH","CRITICAL"].includes(String(row.risk_level))), columns: [{key:"id",label:"사건번호"},{key:"started_at",label:"접수 시각",date:true},{key:"senior",label:"관련 사용자"},{key:"risk_level",label:"신고 유형"},{key:"decision",label:"처리 단계"},{key:"action",label:"조치 결과"}] },
+    consents: { title: "개인정보 동의 현황", description: "사용자별 동의 유형·버전·동의 여부를 조회합니다.", rows: data?.consents ?? [], columns: [{key:"user",label:"사용자"},{key:"type",label:"동의 항목"},{key:"version",label:"버전"},{key:"accepted",label:"동의 상태"},{key:"created_at",label:"처리 시각",date:true}] },
+    disposals: { title: "철회·파기 이력", description: "철회된 동의와 삭제된 음성·얼굴 등록 상태를 확인합니다.", rows: [...(data?.consents ?? []).filter(row=>row.accepted===false), ...(data?.family_members ?? []).filter(row=>row.voice_status==="DELETED"||row.face_status==="DELETED")], columns: [{key:"id",label:"요청번호"},{key:"user",label:"사용자"},{key:"type",label:"대상"},{key:"accepted",label:"상태"},{key:"created_at",label:"처리 시각",date:true}] },
+    admins: { title: "관리자 계정·권한", description: "등록된 관리자 계정과 역할을 확인합니다. 비밀번호는 표시하지 않습니다.", rows: data?.admins ?? [], columns: [{key:"admin_id",label:"관리자 ID"},{key:"name",label:"이름"},{key:"role",label:"역할"},{key:"created_at",label:"생성일",date:true}] },
+    audits: { title: "관리자 작업·보안감사 로그", description: "감사 로그는 조회만 가능하며 수정하거나 삭제할 수 없습니다.", rows: data?.audits ?? [], columns: [{key:"actor",label:"관리자"},{key:"action",label:"작업"},{key:"resource_type",label:"대상 유형"},{key:"resource_id",label:"대상 ID"},{key:"created_at",label:"작업 시각",date:true}] },
+  };
+  const downloadCsv = () => { const item = tab === "reports" ? config.calls : config[tab as Exclude<AdminTab,"dashboard"|"reports">]; if (!item) return; const csv = [item.columns.map(c=>c.label), ...item.rows.map(row=>item.columns.map(c=>adminValue(row[c.key])))].map(line=>line.map(value=>`"${value.split('"').join('""')}"`).join(",")).join("\n"); const link=document.createElement("a"); link.href=URL.createObjectURL(new Blob(["\uFEFF",csv],{type:"text/csv;charset=utf-8"})); link.download=`soricall-${tab}-${new Date().toISOString().slice(0,10)}.csv`; link.click(); URL.revokeObjectURL(link.href); };
+  const selectTab = (next: AdminTab) => { setTab(next); setQuery(""); setSelected(null); };
+  const currentItem = tab === "dashboard" || tab === "reports" ? null : config[tab];
+  return <div className="admin-console">
+    <aside className="admin-sidebar">
+      <div className="admin-sidebar-brand"><span><Shield/></span><div><b>SoriCall Admin</b><small>안심소리 가족콜 운영 콘솔</small></div></div>
+      <nav className="admin-menu-tree">{adminMenuGroups.map(group => {
+        const expanded = expandedGroups.includes(group.id);
+        return <div className="admin-menu-group" key={group.id}>
+          <button className={group.tab === tab ? "active" : ""} onClick={() => group.tab ? selectTab(group.tab) : setExpandedGroups(current => expanded ? current.filter(id => id !== group.id) : [...current, group.id])}>{group.icon}<span>{group.label}</span>{group.children && <ChevronRight className={expanded ? "expanded" : ""}/>}</button>
+          {group.children && expanded && <div className="admin-submenu">{group.children.map(item => <button className={tab === item.id ? "active" : ""} key={item.id} onClick={() => selectTab(item.id)}><i/>{item.label}</button>)}</div>}
+        </div>;
+      })}</nav>
+      <div className="admin-sidebar-account"><span><CircleUserRound/></span><div><b>{adminName}</b><small>최고관리자</small></div></div>
+    </aside>
+    <section className="admin-workspace">
+      <header className="admin-content-header"><div><h1>{adminTabLabel[tab]}</h1><p>{new Date().toLocaleDateString("ko-KR")} · {adminName} · 개인정보 접근 기록 대상</p></div><div><button className="secondary" onClick={() => void load()}><Activity/>새로고침</button><button className="admin-logout-button" onClick={onLogout}>로그아웃</button></div></header>
+      {error && <div className="inline-api-error"><span>{error}</span></div>}
+      {tab === "dashboard" && <><div className="admin-metric-grid"><Stat icon={<CircleUserRound/>} value={String(data?.metrics.seniors??0)} label="전체 어르신"/><Stat icon={<Users/>} value={String(data?.metrics.family_members??0)} label="등록 가족"/><Stat icon={<Mic/>} value={`${data?.metrics.voice_rate??0}%`} label="음성 등록률"/><Stat icon={<Video/>} value={`${data?.metrics.face_rate??0}%`} label="얼굴 등록률"/><Stat icon={<PhoneCall/>} value={String(data?.metrics.calls??0)} label="분석 통화"/><Stat icon={<ShieldAlert/>} value={String(data?.metrics.danger_calls??0)} label="위험·긴급" tone="orange"/><Stat icon={<PhoneOff/>} value={String(data?.metrics.blocked_calls??0)} label="자동 차단" tone="red"/><Stat icon={<Bell/>} value={String(data?.metrics.pending_confirmations??0)} label="미응답 확인" tone="orange"/></div><div className="admin-card"><h3>최근 위험 통화</h3><AdminDataTable rows={(data?.calls??[]).slice(0,10)} query="" onSelect={setSelected} columns={config.calls.columns}/></div></>}
+      {tab === "reports" && <><div className="admin-page-title"><div><span>ADM-070</span><h1>운영 통계</h1><p>개인정보가 마스킹된 통화 현황을 출력합니다.</p></div><button className="primary" onClick={downloadCsv}>CSV 다운로드</button></div><div className="admin-metric-grid"><Stat icon={<PhoneCall/>} value={String(data?.metrics.calls??0)} label="분석 통화"/><Stat icon={<ShieldAlert/>} value={String(data?.metrics.danger_calls??0)} label="위험 통화" tone="orange"/><Stat icon={<Mic/>} value={`${data?.metrics.voice_rate??0}%`} label="음성 등록률"/><Stat icon={<Video/>} value={`${data?.metrics.face_rate??0}%`} label="얼굴 등록률"/></div></>}
+      {currentItem && <><div className="admin-section-heading"><div><h2>{currentItem.title}</h2><p>{currentItem.description}</p></div><button className="secondary" onClick={downloadCsv}>CSV</button></div><div className="admin-toolbar"><div><Search/><input placeholder="검색" value={query} onChange={event=>setQuery(event.target.value)}/></div><span>최대 200건 표시 · 개인정보 마스킹</span></div><AdminDataTable rows={currentItem.rows} columns={currentItem.columns} query={query} onSelect={setSelected}/></>}
+      {loading && <div className="admin-loading">관리자 데이터를 불러오는 중입니다…</div>}
+    </section>
+    {selected && <div className="admin-detail-drawer"><button onClick={()=>setSelected(null)} aria-label="상세 닫기"><X/></button><span>상세 정보</span><h2>{adminValue(selected.id??"선택 항목")}</h2><div>{Object.entries(selected).map(([key,value])=><p key={key}><b>{key}</b><span>{key.includes("at")?formatAdminDate(value):adminValue(value)}</span></p>)}</div><small><Shield/> 원본 음성·얼굴 및 전체 전화번호는 제공하지 않습니다.</small></div>}
+  </div>;
+}
 
 function FormCard({ step, title, description, children }: { step?: string; title: string; description: string; children: React.ReactNode }) { return <div className="form-wrap"><div className="form-card">{step && <span className="step">{step}</span>}<h1>{title}</h1><p className="lead">{description}</p><div className="form-content">{children}</div></div></div>; }
 function Field({ label, placeholder, type="text", suffix, autoComplete, value, onChange }: { label: string; placeholder: string; type?: string; suffix?: string; autoComplete?: string; value?:string; onChange?:(value:string)=>void }) { return <label className="field"><span>{label}</span><div><input type={type} autoComplete={autoComplete} placeholder={placeholder} value={value} onChange={e => onChange?.(e.target.value)}/>{suffix && <button type="button">{suffix}</button>}</div></label>; }

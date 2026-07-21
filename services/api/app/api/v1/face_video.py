@@ -197,7 +197,7 @@ def _validate_face_image(image_ref: str | None) -> tuple[str | None, int | None,
     if not image_ref:
         raise ValueError("face image is required")
     if not image_ref.startswith("data:"):
-        if get_settings().app_env == "development":
+        if get_settings().app_env in {"development", "test"}:
             return hashlib.sha256(image_ref.encode()).hexdigest(), len(image_ref.encode()), "DEVELOPMENT_REFERENCE"
         raise ValueError("face image must be an uploaded image")
     try:

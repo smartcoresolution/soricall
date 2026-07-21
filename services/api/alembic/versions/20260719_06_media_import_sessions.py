@@ -17,9 +17,9 @@ depends_on = None
 def upgrade() -> None:
     op.create_table(
         "media_import_sessions",
-        sa.Column("id", sa.CHAR(length=36), nullable=False),
-        sa.Column("family_id", sa.CHAR(length=36), nullable=False),
-        sa.Column("family_member_id", sa.CHAR(length=36), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("family_id", sa.Uuid(), nullable=False),
+        sa.Column("family_member_id", sa.Uuid(), nullable=False),
         sa.Column("source", sa.String(length=30), nullable=False),
         sa.Column("filename", sa.String(length=255), nullable=False),
         sa.Column("declared_mime_type", sa.String(length=100), nullable=False),

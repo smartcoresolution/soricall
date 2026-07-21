@@ -1,8 +1,10 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
 from app.api.deps import DbSession
-from app.models import VoiceProfile
+from app.models import VoiceProfile, VoiceSample
 from app.schemas import (
     VoiceEnrollRequest,
     VoiceEnrollResponse,
@@ -32,7 +34,7 @@ def create_voice_profile(request: VoiceProfileCreate, db: DbSession) -> VoicePro
 
 @router.get("", response_model=list[VoiceProfileResponse])
 def list_voice_profiles(db: DbSession, family_member_id: str | None = None) -> list[VoiceProfile]:
-    statement = select(VoiceProfile)
+    statement = select(VoiceProfile).where(VoiceProfile.status != "DELETED")
     if family_member_id:
         statement = statement.where(VoiceProfile.family_member_id == family_member_id)
     return list(db.scalars(statement))
@@ -100,4 +102,9 @@ def delete_voice_profile(profile_id: str, db: DbSession) -> None:
     profile.embedding = None
     profile.embedding_model = None
     profile.embedding_version = None
+    for sample in db.scalars(select(VoiceSample).where(VoiceSample.voice_profile_id == profile_id)):
+        sample.audio_ref = None
+        sample.object_key = None
+        sample.retained = False
+        sample.deleted_at = datetime.now(timezone.utc)
     db.commit()

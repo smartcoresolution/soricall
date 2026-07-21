@@ -1,13 +1,14 @@
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 from datetime import datetime, timedelta, timezone
+import json
 import secrets
 
 from app.api.deps import DbSession
 from app.core.security import create_access_token, create_refresh_token, hash_password, hash_phone_number, hash_refresh_token, hash_verification_code, normalize_phone_number, phone_last4, verify_password
 from app.core.config import get_settings
-from app.models import Family, PhoneVerification, RefreshToken, Senior, User
-from app.schemas import AuthResponse, LoginRequest, PhoneVerificationConfirmRequest, PhoneVerificationConfirmResponse, PhoneVerificationSendRequest, PhoneVerificationSendResponse, RefreshTokenRequest, RegisterRequest, UserPublic
+from app.models import AuditLog, Family, PhoneVerification, RefreshToken, Senior, User
+from app.schemas import AdminLoginRequest, AuthResponse, LoginRequest, PhoneVerificationConfirmRequest, PhoneVerificationConfirmResponse, PhoneVerificationSendRequest, PhoneVerificationSendResponse, RefreshTokenRequest, RegisterRequest, UserPublic
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -111,6 +112,23 @@ def login(request: LoginRequest, db: DbSession) -> AuthResponse:
     if not user or not user.password_hash or not verify_password(request.password, user.password_hash):
         raise HTTPException(status_code=401, detail="invalid phone number or password")
 
+    return _auth_response(user, db)
+
+
+@router.post("/admin/login", response_model=AuthResponse)
+def admin_login(request: AdminLoginRequest, db: DbSession) -> AuthResponse:
+    admin_id = request.admin_id.strip().lower()
+    user = db.scalar(select(User).where(User.email == admin_id, User.role == "ADMIN"))
+    if (
+        not user
+        or not user.password_hash
+        or not verify_password(request.password, user.password_hash)
+    ):
+        db.add(AuditLog(action="ADMIN_LOGIN_FAILED", resource_type="ADMIN_SESSION", metadata_json=json.dumps({"admin_id": admin_id})))
+        db.commit()
+        raise HTTPException(status_code=401, detail="invalid admin credentials")
+    db.add(AuditLog(actor_user_id=user.id, action="ADMIN_LOGIN_SUCCESS", resource_type="ADMIN_SESSION", metadata_json="{}"))
+    db.commit()
     return _auth_response(user, db)
 
 

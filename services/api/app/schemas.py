@@ -26,6 +26,11 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class AdminLoginRequest(BaseModel):
+    admin_id: str = Field(min_length=1, max_length=255)
+    password: str = Field(min_length=8)
+
+
 class PhoneVerificationSendRequest(BaseModel):
     phone_number: str = Field(pattern=r"^01[016789]-?\d{3,4}-?\d{4}$")
 
@@ -162,6 +167,7 @@ class ProtectedCallUserResponse(BaseModel):
     name: str
     member_type: str
     relation_code: str
+    phone_number: str | None
     phone_number_last4: str | None
     protection_status: str
 

@@ -1,4 +1,4 @@
-const CACHE_NAME = "soricall-shell-v2";
+const CACHE_NAME = "soricall-shell-v3";
 const APP_ROOT = new URL("./", self.location).pathname;
 const SHELL_ASSETS = [APP_ROOT, `${APP_ROOT}manifest.webmanifest`, `${APP_ROOT}icon.svg`];
 
@@ -21,6 +21,8 @@ self.addEventListener("fetch", (event) => {
   const pathname = new URL(request.url).pathname;
   if (request.method !== "GET" || pathname.startsWith("/api/") || pathname.startsWith("/soricall-api/")) return;
   event.respondWith(
-    fetch(request).catch(() => caches.match(request).then((cached) => cached || caches.match(APP_ROOT))),
+    fetch(request, { cache: "no-store" }).catch(() =>
+      caches.match(request).then((cached) => cached || caches.match(APP_ROOT)),
+    ),
   );
 });
