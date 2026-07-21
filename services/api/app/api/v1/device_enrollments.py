@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app.api.deps import DbSession
 from app.core.config import get_settings
-from app.core.security import hash_value, hash_verification_code, hash_phone_number, normalize_phone_number
+from app.core.security import create_access_token, hash_value, hash_verification_code, hash_phone_number, normalize_phone_number
 from app.models import DeviceEnrollment, Family, PhoneVerification, Senior
 from app.schemas import (
     DeviceEnrollmentResponse,
@@ -14,6 +14,7 @@ from app.schemas import (
     DeviceVerificationRequest,
     PhoneVerificationSendResponse,
 )
+from app.services.sms_service import SmsDeliveryError, send_verification_code
 
 
 family_router = APIRouter(prefix="/families", tags=["device-enrollments"])
@@ -65,6 +66,11 @@ def send_device_verification(token: str, request: DeviceVerificationRequest, db:
     db.add(verification)
     db.flush()
     verification.code_hash = hash_verification_code(verification.id, code)
+    try:
+        send_verification_code(verification.phone_number, code)
+    except SmsDeliveryError as error:
+        db.rollback()
+        raise HTTPException(status_code=503, detail="SMS delivery is not configured or unavailable") from error
     db.commit()
     return PhoneVerificationSendResponse(
         verification_id=verification.id,
@@ -107,7 +113,13 @@ def complete_device_enrollment(token: str, db: DbSession) -> DeviceEnrollmentRes
     enrollment.status = "ACTIVE"
     senior.protection_status = "ACTIVE"
     db.commit()
-    return _response(enrollment, senior)
+    settings = get_settings()
+    access_token = create_access_token(
+        f"device:{enrollment.id}",
+        settings.device_access_token_expire_days * 24 * 60 * 60,
+        {"scope": "device", "senior_id": senior.id, "enrollment_id": enrollment.id},
+    )
+    return _response(enrollment, senior, access_token=access_token)
 
 
 def _for_token(token: str, db: DbSession) -> tuple[DeviceEnrollment, Senior]:
@@ -126,7 +138,12 @@ def _for_token(token: str, db: DbSession) -> tuple[DeviceEnrollment, Senior]:
     return enrollment, senior
 
 
-def _response(enrollment: DeviceEnrollment, senior: Senior, url: str | None = None) -> DeviceEnrollmentResponse:
+def _response(
+    enrollment: DeviceEnrollment,
+    senior: Senior,
+    url: str | None = None,
+    access_token: str | None = None,
+) -> DeviceEnrollmentResponse:
     return DeviceEnrollmentResponse(
         id=enrollment.id,
         protected_user_id=senior.id,
@@ -134,6 +151,7 @@ def _response(enrollment: DeviceEnrollment, senior: Senior, url: str | None = No
         phone_number_last4=senior.phone_number_last4,
         status=enrollment.status,
         enrollment_url=url,
+        access_token=access_token,
     )
 
 

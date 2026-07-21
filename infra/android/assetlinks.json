@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.ansimsori.soricall",
+      "sha256_cert_fingerprints": [
+        "BA:8C:59:B2:8E:B0:57:01:B0:44:CB:5D:EB:9B:0D:61:60:37:8F:7F:38:9F:C6:80:85:71:EB:55:CE:C6:49:56"
+      ]
+    }
+  }
+]

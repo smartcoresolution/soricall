@@ -23,6 +23,7 @@ data class DeviceEnrollmentDto(
     val protectedUserName: String,
     val phoneNumberLast4: String?,
     val status: String,
+    val accessToken: String? = null,
 )
 
 data class PhoneVerificationDto(

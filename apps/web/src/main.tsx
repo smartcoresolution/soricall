@@ -85,6 +85,24 @@ function userMessage(error: unknown): string {
 
 const isValidMobilePhone = (value: string) => /^01[016789]-?\d{3,4}-?\d{4}$/.test(value.trim());
 
+async function copyText(value: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch {
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const copied = document.execCommand("copy");
+    textarea.remove();
+    return copied;
+  }
+}
+
 function App() {
   const query = new URLSearchParams(window.location.search);
   const qrInvitationId = query.get("qr_invitation_id");
@@ -605,21 +623,39 @@ function App() {
   const shareParentInstall = async (family: RegisteredProtectedFamily) => {
     if (!familyId) throw new Error("가족 정보가 없습니다.");
     const enrollment = await apiPost<DeviceEnrollment>(`/api/v1/families/${familyId}/protected-call-users/${family.id}/device-enrollment`, {});
-    const link = new URL(enrollment.enrollment_url ?? "", window.location.origin);
-    const shareData = {
+    const connectionUrl = new URL(enrollment.enrollment_url ?? "", window.location.origin).toString();
+    const apkUrl = new URL(`${import.meta.env.BASE_URL}downloads/soricall.apk`, window.location.origin).toString();
+    const message = `${family.name}님, SoriCall APK를 설치한 뒤 이 메시지의 연결 링크를 다시 눌러 휴대전화 번호 인증과 권한 설정을 완료해 주세요.\n\n연결 링크: ${connectionUrl}`;
+    const linkShareData = {
       title: "SoriCall 통화 보호 앱 설치",
-      text: `${family.name}님, 아래 링크를 열어 SoriCall 앱을 설치하고 통화 보호를 켜 주세요.`,
-      url: link.toString(),
+      text: message,
+      url: apkUrl,
+    };
+    const copyInstallGuide = async () => {
+      const copied = await copyText(`${message}\n\nAPK 다운로드: ${apkUrl}`);
+      if (copied) setApiMessage("APK 다운로드 주소와 연결 안내를 복사했습니다. 문자나 카카오톡에 붙여 넣어 주세요.");
+      else setApiError(`설치 안내를 복사하지 못했습니다. APK 주소를 직접 전달해 주세요: ${apkUrl}`);
     };
     try {
-      if (navigator.share) await navigator.share(shareData);
-      else {
-        await navigator.clipboard.writeText(`${shareData.text}\n${shareData.url}`);
-        setApiMessage("앱 설치 안내를 복사했습니다.");
+      if (navigator.share && navigator.canShare) {
+        const response = await fetch(apkUrl);
+        if (!response.ok) throw new Error("APK download failed");
+        const apkFile = new File([await response.blob()], "SoriCall.apk", {
+          type: "application/vnd.android.package-archive",
+        });
+        const fileShareData: ShareData = { title: linkShareData.title, text: message, files: [apkFile] };
+        if (navigator.canShare(fileShareData)) {
+          await navigator.share(fileShareData);
+          return;
+        }
       }
+      if (navigator.share
+        && (typeof navigator.canShare !== "function" || navigator.canShare(linkShareData))) {
+        await navigator.share(linkShareData);
+      } else await copyInstallGuide();
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
-      setApiError("앱 설치 안내를 공유하지 못했습니다. 다시 시도해 주세요.");
+      await copyInstallGuide();
     }
   };
   const openFamilyEnrollment = (invitation: EnrollmentInvitation) => {

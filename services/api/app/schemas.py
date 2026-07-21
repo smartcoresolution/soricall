@@ -52,6 +52,7 @@ class DeviceEnrollmentResponse(BaseModel):
     phone_number_last4: str | None
     status: str
     enrollment_url: str | None = None
+    access_token: str | None = None
 
 
 class DeviceVerificationRequest(BaseModel):

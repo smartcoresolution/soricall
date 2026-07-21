@@ -327,7 +327,10 @@ private fun DeviceEnrollmentScreen(token: String) {
                 InfoCard("마지막 단계", "필요한 Android 권한이 설정됐습니다. 통화 보호를 활성화해 주세요.")
                 PrimaryButton("통화 보호 시작", { work {
                     val result = application.api.completeDeviceEnrollment(token)
-                    application.completeDeviceConnection(result.protectedUserId)
+                    application.completeDeviceConnection(
+                        result.protectedUserId,
+                        checkNotNull(result.accessToken) { "기기 인증 정보를 받지 못했습니다." },
+                    )
                     application.refreshScreeningCache(result.protectedUserId)
                     enrollment = result
                 } }, !busy)

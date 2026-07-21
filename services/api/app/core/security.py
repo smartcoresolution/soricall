@@ -40,7 +40,11 @@ def phone_last4(phone_number: str) -> str:
     return digits[-4:]
 
 
-def create_access_token(subject: str, expires_in_seconds: int = 3600) -> str:
+def create_access_token(
+    subject: str,
+    expires_in_seconds: int = 3600,
+    claims: dict[str, Any] | None = None,
+) -> str:
     settings = get_settings()
     header = {"alg": "HS256", "typ": "JWT"}
     payload = {
@@ -48,6 +52,8 @@ def create_access_token(subject: str, expires_in_seconds: int = 3600) -> str:
         "exp": int(time.time()) + expires_in_seconds,
         "jti": secrets.token_hex(16),
     }
+    if claims:
+        payload.update(claims)
     signing_input = ".".join([_b64_json(header), _b64_json(payload)])
     signature = hmac.new(
         settings.jwt_secret.encode("utf-8"),

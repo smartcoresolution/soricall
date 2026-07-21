@@ -24,7 +24,7 @@ from app.api.v1 import (
 )
 from app.core.config import get_settings
 from app.core.database import SessionLocal, init_db
-from app.core.authorization import PROTECTED_PREFIXES, authenticate_request, authorized_for_request, current_user_id
+from app.core.authorization import DevicePrincipal, PROTECTED_PREFIXES, authenticate_request, authorized_for_request, current_user_id
 from app.core.operations import log_request, rate_limit_response, request_trace_id
 
 
@@ -120,11 +120,11 @@ async def patent_api_authorization(request: Request, call_next):
             return JSONResponse(status_code=401, content={"detail": "authentication required"})
         if not await authorized_for_request(request, db, user):
             return JSONResponse(status_code=403, content={"detail": "family access denied"})
-        request.state.current_user_id = user.id
+        request.state.current_user_id = None if isinstance(user, DevicePrincipal) else user.id
         # Authorization is complete; do not keep a read transaction open while
         # the endpoint writes through its own database session (notably SQLite in dev/tests).
         db.close()
-        context_token = current_user_id.set(user.id)
+        context_token = current_user_id.set(None if isinstance(user, DevicePrincipal) else user.id)
         try:
             return await call_next(request)
         finally:

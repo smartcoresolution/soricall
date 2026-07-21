@@ -8,7 +8,7 @@ from app.api.v1.device_enrollments import (
     send_device_verification,
 )
 from app.core.database import Base, SessionLocal, engine
-from app.core.security import hash_phone_number
+from app.core.security import decode_access_token, hash_phone_number
 from app.models import Family, Senior
 from app.schemas import DeviceVerificationConfirmRequest, DeviceVerificationRequest
 
@@ -44,4 +44,9 @@ def test_parent_device_enrollment_flow() -> None:
     assert verified.status == "PHONE_VERIFIED"
     completed = complete_device_enrollment(token, db)
     assert completed.status == "ACTIVE"
+    assert completed.access_token
+    claims = decode_access_token(completed.access_token)
+    assert claims is not None
+    assert claims["scope"] == "device"
+    assert claims["senior_id"] == senior.id
     assert db.get(Senior, senior.id).protection_status == "ACTIVE"

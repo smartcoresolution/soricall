@@ -80,6 +80,7 @@ class HttpSoriCallApi(
         protectedUserName = json.getString("protected_user_name"),
         phoneNumberLast4 = json.optString("phone_number_last4").takeIf { it.isNotBlank() && it != "null" },
         status = json.getString("status"),
+        accessToken = json.optString("access_token").takeIf { it.isNotBlank() && it != "null" },
     )
 
     private fun encoded(value: String): String = URLEncoder.encode(value, Charsets.UTF_8.name())

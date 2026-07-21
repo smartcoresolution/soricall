@@ -11,8 +11,8 @@ android {
         applicationId = "com.ansimsori.soricall"
         minSdk = 29
         targetSdk = 35
-        versionCode = 6
-        versionName = "0.3.3"
+        versionCode = 7
+        versionName = "0.3.4"
         buildConfigField("String", "SORICALL_API_BASE_URL", "\"https://www.ansimsori.ai/soricall-api\"")
     }
 

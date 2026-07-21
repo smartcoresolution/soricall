@@ -19,6 +19,12 @@ class Settings(BaseSettings):
     retain_voice_samples: bool = False
     retain_face_images: bool = False
     enrollment_delivery_backend: str = "development_link"
+    sms_webhook_url: str | None = None
+    sms_webhook_bearer_token: str | None = None
+    sms_sender: str | None = None
+    solapi_api_key: str | None = None
+    solapi_api_secret: str | None = None
+    device_access_token_expire_days: int = 365
     cors_origins: str = (
         "http://localhost:5173,http://127.0.0.1:5173,"
         "http://localhost:5174,http://127.0.0.1:5174"

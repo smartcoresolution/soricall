@@ -96,8 +96,12 @@ class SoriCallApplication : Application() {
         preferences.edit().putString("senior_id", seniorId).putString("access_token", accessToken).apply()
     }
 
-    fun completeDeviceConnection(seniorId: String) {
-        preferences.edit().putString("senior_id", seniorId).remove("device_enrollment_token").apply()
+    fun completeDeviceConnection(seniorId: String, accessToken: String) {
+        preferences.edit()
+            .putString("senior_id", seniorId)
+            .putString("access_token", accessToken)
+            .remove("device_enrollment_token")
+            .apply()
     }
 
     fun clearConnection() {

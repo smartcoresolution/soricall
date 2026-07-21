@@ -1,24 +1,43 @@
 import json
 from contextvars import ContextVar
+from dataclasses import dataclass
 
 from fastapi import Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.security import decode_access_token
-from app.models import CallSession, Family, FamilyConfirmation, FamilyMember, Guardian, Senior, User
+from app.models import CallSession, DeviceEnrollment, Family, FamilyConfirmation, FamilyMember, Guardian, Senior, User
 
 
 PROTECTED_PREFIXES = ("/api/v1",)
 current_user_id: ContextVar[str | None] = ContextVar("current_user_id", default=None)
 
 
-def authenticate_request(request: Request, db: Session) -> User | None:
+@dataclass(frozen=True)
+class DevicePrincipal:
+    enrollment_id: str
+    senior_id: str
+
+
+def authenticate_request(request: Request, db: Session) -> User | DevicePrincipal | None:
     authorization = request.headers.get("authorization", "")
     if not authorization.startswith("Bearer "):
         return None
     payload = decode_access_token(authorization.removeprefix("Bearer ").strip())
     if not payload or not payload.get("sub"):
+        return None
+    if payload.get("scope") == "device":
+        enrollment_id = str(payload.get("enrollment_id", ""))
+        senior_id = str(payload.get("senior_id", ""))
+        enrollment = db.get(DeviceEnrollment, enrollment_id)
+        if (
+            enrollment
+            and enrollment.status == "ACTIVE"
+            and enrollment.senior_id == senior_id
+            and str(payload["sub"]) == f"device:{enrollment_id}"
+        ):
+            return DevicePrincipal(enrollment_id, senior_id)
         return None
     return db.get(User, str(payload["sub"]))
 
@@ -65,8 +84,21 @@ def can_access_family(db: Session, user: User, family_id: str) -> bool:
     ) is not None
 
 
-async def authorized_for_request(request: Request, db: Session, user: User) -> bool:
+async def authorized_for_request(request: Request, db: Session, user: User | DevicePrincipal) -> bool:
     path = request.url.path
+    if isinstance(user, DevicePrincipal):
+        if path == f"/api/v1/seniors/{user.senior_id}/screening-cache" and request.method == "GET":
+            return True
+        if path == "/api/v1/call-sessions" and request.method == "POST":
+            try:
+                return str(json.loads(await request.body())["senior_id"]) == user.senior_id
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                return False
+        if path.startswith("/api/v1/call-sessions/"):
+            parts = path.split("/")
+            call_session = db.get(CallSession, parts[4]) if len(parts) > 4 else None
+            return bool(call_session and call_session.senior_id == user.senior_id)
+        return False
     if path.startswith("/api/v1/auth/"):
         return True
     if path.startswith("/api/v1/admin/"):
