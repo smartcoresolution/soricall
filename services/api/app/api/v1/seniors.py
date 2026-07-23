@@ -1,10 +1,13 @@
+from datetime import datetime, timezone
+import hashlib
+
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
 from app.api.deps import DbSession
 from app.core.security import hash_phone_number, phone_last4
-from app.models import Family, Guardian, Senior, User
-from app.schemas import GuardianCreate, GuardianResponse, SeniorCreate, SeniorResponse
+from app.models import Family, FamilyMember, Guardian, RiskNumber, Senior, User
+from app.schemas import GuardianCreate, GuardianResponse, ScreeningCacheResponse, SeniorCreate, SeniorResponse
 
 
 router = APIRouter(prefix="/seniors", tags=["seniors"])
@@ -37,6 +40,38 @@ def get_senior(senior_id: str, db: DbSession) -> Senior:
     return senior
 
 
+@router.get("/{senior_id}/screening-cache", response_model=ScreeningCacheResponse)
+def get_screening_cache(senior_id: str, db: DbSession) -> ScreeningCacheResponse:
+    senior = db.get(Senior, senior_id)
+    if not senior:
+        raise HTTPException(status_code=404, detail="senior not found")
+    family_hashes = sorted({
+        value
+        for value in db.scalars(
+            select(FamilyMember.phone_number_hash).where(
+                FamilyMember.family_id == senior.family_id,
+                FamilyMember.phone_number_hash.is_not(None),
+                FamilyMember.approval_status == "ACTIVE",
+            )
+        )
+        if value
+    })
+    risk_hashes = sorted({
+        value
+        for value in db.scalars(
+            select(RiskNumber.phone_number_hash).where(RiskNumber.active.is_(True))
+        )
+        if value
+    })
+    version_payload = ",".join([*family_hashes, "|", *risk_hashes])
+    return ScreeningCacheResponse(
+        version=hashlib.sha256(version_payload.encode()).hexdigest()[:16],
+        generated_at=datetime.now(timezone.utc),
+        family_number_hashes=family_hashes,
+        risk_number_hashes=risk_hashes,
+    )
+
+
 @router.post(
     "/{senior_id}/guardians",
     response_model=GuardianResponse,
@@ -64,4 +99,3 @@ def add_guardian(senior_id: str, request: GuardianCreate, db: DbSession) -> Guar
 @router.get("/{senior_id}/guardians", response_model=list[GuardianResponse])
 def list_guardians(senior_id: str, db: DbSession) -> list[Guardian]:
     return list(db.scalars(select(Guardian).where(Guardian.senior_id == senior_id)))
-

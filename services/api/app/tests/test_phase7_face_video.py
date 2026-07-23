@@ -4,6 +4,7 @@ from app.api.v1.face_video import (
     create_video_verification,
     list_face_profiles,
     list_video_verifications,
+    delete_face_profile,
 )
 from app.api.v1.families import add_family_member, create_family
 from app.api.v1.seniors import create_senior
@@ -80,4 +81,34 @@ def test_video_verification_accept_sets_match_result() -> None:
     assert accepted.result == "HIGH_MATCH"
     assert requests[0].match_score == 91
 
+    db.close()
+
+
+def test_face_profile_requires_consent_and_soft_delete_removes_raw_reference() -> None:
+    db = SessionLocal()
+    family = create_family(FamilyCreate(name="얼굴 동의 가족"), db)
+    member = add_family_member(
+        family.id,
+        FamilyMemberCreate(name="딸", relation="DAUGHTER", phone_number="+821012345679"),
+        db,
+    )
+    profile = create_face_profile(
+        FaceProfileCreate(
+            family_member_id=member.id,
+            display_name="딸 얼굴",
+            image_ref="data:image/png;base64,aW1hZ2U=",
+            consent_accepted=True,
+        ),
+        db,
+    )
+    assert profile.validation_status == "VALIDATED"
+    assert profile.size_bytes == 5
+    assert profile.image_ref is None
+    assert profile.consented_at is not None
+
+    delete_face_profile(profile.id, db)
+    db.refresh(profile)
+    assert profile.status == "DELETED"
+    assert profile.consent_accepted is False
+    assert profile.deleted_at is not None
     db.close()

@@ -27,6 +27,8 @@ class VoiceAnalysisResult:
     text: str
     language: str
     text_confidence: float
+    content_risk_score: int
+    content_reason_codes: list[str]
     risk_score: int
     risk_level: str
     reason_codes: list[str]
@@ -81,6 +83,8 @@ class VoiceAnalysisPipeline:
             text=stt.text,
             language=stt.language,
             text_confidence=stt.confidence,
+            content_risk_score=text_risk.risk_score,
+            content_reason_codes=text_risk.reason_codes,
             risk_score=int(final_score["risk_score"]),
             risk_level=str(final_score["risk_level"]),
             reason_codes=list(final_score["reason_codes"]),
@@ -96,4 +100,3 @@ def _message_for_level(level: str) -> str:
     if level == "CAUTION":
         return "주의가 필요합니다. 송금이나 앱 설치 요청은 반드시 가족에게 다시 확인하세요."
     return "뚜렷한 위험 신호는 낮습니다."
-

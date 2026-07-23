@@ -1,5 +1,15 @@
 # SoriCall Android
 
+## Device connection
+
+The app starts on the device connection screen until a `senior_id` and access token are
+validated. The emulator uses `http://10.0.2.2:8000` by default. Change
+`SORICALL_API_BASE_URL` in `app/build.gradle.kts` for a physical device or production build.
+
+To receive incoming-call screening, grant SoriCall the call-screening role in Android system
+settings. Warning notifications also require notification and full-screen notification
+permission on Android versions that expose those controls.
+
 Android app scaffold for the SoriCall MVP.
 
 This phase includes a Kotlin + Jetpack Compose project skeleton, MVP screens, local demo repositories, and a `CallScreeningService` skeleton.

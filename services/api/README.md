@@ -15,6 +15,12 @@ uvicorn app.main:app --reload --port 8000
 ../../.venv/bin/pytest app/tests
 ```
 
+## Database migrations
+
+```bash
+../../.venv/bin/alembic upgrade head
+```
+
 ## Seed Demo Data
 
 ```bash

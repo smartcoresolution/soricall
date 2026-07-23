@@ -28,6 +28,20 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": settings.service_name}
 
 
+@app.get("/ready", tags=["health"])
+def ready() -> dict[str, object]:
+    providers = {
+        "speaker": settings.speaker_provider,
+        "anti_spoof": settings.anti_spoof_provider,
+        "stt": settings.stt_provider,
+        "nlp": settings.nlp_provider,
+    }
+    return {
+        "status": "ready" if settings.app_env != "production" or "mock" not in providers.values() else "not_ready",
+        "providers": providers,
+    }
+
+
 @app.post("/v1/text/analyze", response_model=TextAnalyzeResponse, tags=["analysis"])
 def analyze_text(request: TextAnalyzeRequest) -> TextAnalyzeResponse:
     result = nlp_risk_adapter.analyze_text(request.text)
@@ -65,8 +79,14 @@ def analyze_voice(request: VoiceAnalyzeRequest) -> VoiceAnalyzeResponse:
         text=result.text,
         language=result.language,
         text_confidence=result.text_confidence,
+        content_risk_score=result.content_risk_score,
+        content_reason_codes=result.content_reason_codes,
         risk_score=result.risk_score,
         risk_level=result.risk_level,
         reason_codes=result.reason_codes,
         message_for_senior=result.message_for_senior,
+        model_version=(
+            f"{settings.speaker_provider}:{settings.anti_spoof_provider}:"
+            f"{settings.stt_provider}:{settings.nlp_provider}"
+        ),
     )

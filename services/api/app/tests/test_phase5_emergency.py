@@ -1,4 +1,3 @@
-from app.api.v1.auth import register
 from app.api.v1.admin import create_risk_number
 from app.api.v1.emergency import confirm_family_call, list_notifications, respond_to_emergency
 from app.api.v1.families import create_family
@@ -10,11 +9,11 @@ from app.schemas import (
     EmergencyRespondRequest,
     FamilyCreate,
     GuardianCreate,
-    RegisterRequest,
     RiskNumberCreate,
     SeniorCreate,
 )
 from app.services.risk_service import RiskService
+from app.tests.factories import register_test_user
 
 
 def setup_function() -> None:
@@ -35,11 +34,13 @@ def test_confirm_family_call_notifies_guardian_and_saves_response() -> None:
     )
 
     assert notification_result.notified_guardians == 1
-    assert notification_result.status == "SENT"
+    # No device token is registered in this fixture, so the notification is
+    # persisted but correctly reported as an external delivery failure.
+    assert notification_result.status == "FAILED"
 
     notifications = list_notifications(db, risk_event_id=notification_result.emergency_event_id)
     assert len(notifications) == 1
-    assert notifications[0].status == "SENT"
+    assert notifications[0].status == "FAILED"
 
     response = respond_to_emergency(
         EmergencyRespondRequest(notification_id=notifications[0].id, response="NOT_ME"),
@@ -73,16 +74,7 @@ def test_high_risk_call_automatically_creates_guardian_notification() -> None:
 
 
 def _create_senior_with_guardian(db) -> str:
-    email = f"guardian-{id(db)}@example.com"
-    guardian_user = register(
-        RegisterRequest(
-            email=email,
-            password="password123",
-            display_name="보호자",
-            role="GUARDIAN",
-        ),
-        db,
-    )
+    guardian_user = register_test_user(db, display_name="보호자")
     family = create_family(FamilyCreate(name="긴급 알림 가족"), db)
     senior = create_senior(SeniorCreate(family_id=family.id, name="어르신"), db)
     add_guardian(

@@ -1,8 +1,10 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
 from app.api.deps import DbSession
-from app.models import VoiceProfile
+from app.models import VoiceProfile, VoiceSample
 from app.schemas import (
     VoiceEnrollRequest,
     VoiceEnrollResponse,
@@ -26,12 +28,13 @@ def create_voice_profile(request: VoiceProfileCreate, db: DbSession) -> VoicePro
             consent_id=request.consent_id,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        status_code = 404 if str(exc) == "family member not found" else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
 @router.get("", response_model=list[VoiceProfileResponse])
 def list_voice_profiles(db: DbSession, family_member_id: str | None = None) -> list[VoiceProfile]:
-    statement = select(VoiceProfile)
+    statement = select(VoiceProfile).where(VoiceProfile.status != "DELETED")
     if family_member_id:
         statement = statement.where(VoiceProfile.family_member_id == family_member_id)
     return list(db.scalars(statement))
@@ -62,7 +65,8 @@ def add_voice_sample(profile_id: str, request: VoiceSampleCreate, db: DbSession)
             purpose=request.purpose,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        status_code = 404 if str(exc) == "voice profile not found" else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
     return VoiceSampleResponse.model_validate(sample)
 
 
@@ -98,4 +102,9 @@ def delete_voice_profile(profile_id: str, db: DbSession) -> None:
     profile.embedding = None
     profile.embedding_model = None
     profile.embedding_version = None
+    for sample in db.scalars(select(VoiceSample).where(VoiceSample.voice_profile_id == profile_id)):
+        sample.audio_ref = None
+        sample.object_key = None
+        sample.retained = False
+        sample.deleted_at = datetime.now(timezone.utc)
     db.commit()

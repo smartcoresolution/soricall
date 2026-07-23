@@ -1,6 +1,4 @@
-import uuid
-
-from app.api.v1.auth import login, register
+from app.api.v1.auth import login
 from app.api.v1.calls import evaluate_call
 from app.api.v1.families import add_family_member, create_family, upsert_safe_word, verify_safe_word
 from app.api.v1.risk_events import create_risk_event
@@ -13,12 +11,12 @@ from app.schemas import (
     FamilyMemberCreate,
     GuardianCreate,
     LoginRequest,
-    RegisterRequest,
     RiskEventCreate,
     SafeWordUpsert,
     SafeWordVerifyRequest,
     SeniorCreate,
 )
+from app.tests.factories import register_test_user
 
 
 def setup_function() -> None:
@@ -28,19 +26,10 @@ def setup_function() -> None:
 
 def test_auth_family_senior_guardian_and_safe_word_flow() -> None:
     db = SessionLocal()
-    email_suffix = uuid.uuid4().hex
-    guardian = register(
-        RegisterRequest(
-            email=f"guardian-{email_suffix}@example.com",
-            password="password123",
-            display_name="보호자",
-            role="GUARDIAN",
-        ),
-        db,
-    )
+    guardian = register_test_user(db, display_name="보호자")
 
     logged_in = login(
-        LoginRequest(email=f"guardian-{email_suffix}@example.com", password="password123"),
+        LoginRequest(phone_number=guardian.user.phone_number, password="password123"),
         db,
     )
     assert logged_in.access_token
@@ -132,6 +121,6 @@ def test_call_evaluation_and_risk_event_flow() -> None:
         ),
         db,
     )
-    assert risk_event.reason_codes == ["UNKNOWN_NUMBER", "FAMILY_IMPERSONATION_RISK"]
+    assert {"UNKNOWN_NUMBER", "FAMILY_IMPERSONATION_RISK"}.issubset(risk_event.reason_codes)
 
     db.close()

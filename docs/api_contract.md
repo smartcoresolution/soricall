@@ -1,5 +1,45 @@
 # API Contract
 
+## Call-protection family registration v2
+
+User-facing terminology is intentionally limited to two roles.
+
+- `PROTECTED_CALL_USER`: parent or grandparent whose incoming calls are protected from voice phishing
+- `FAMILY_CONFIRMATION_CONTACT`: family member who confirms whether a suspicious call was genuine
+
+### Register a family member whose calls will be protected
+
+`POST /api/v1/families/{family_id}/protected-call-users`
+
+```json
+{
+  "name": "김영희",
+  "relation_code": "MOTHER",
+  "phone_number": "010-1111-2222"
+}
+```
+
+Allowed relations: `FATHER`, `MOTHER`, `GRANDFATHER`, `GRANDMOTHER`, `OTHER`.
+
+### Register a family confirmation contact
+
+`POST /api/v1/families/{family_id}/protected-call-users/{protected_user_id}/confirmation-contacts`
+
+```json
+{
+  "name": "김민지",
+  "relation_code": "DAUGHTER",
+  "phone_number": "010-3333-4444",
+  "is_primary_contact": true,
+  "notification_priority": 1,
+  "notify_enabled": true
+}
+```
+
+Allowed relations: `SON`, `DAUGHTER`, `GRANDSON`, `GRANDDAUGHTER`, `SPOUSE`, `OTHER`.
+
+The relation is always expressed from the protected family member's point of view.
+
 The MVP API starts with health checks and expands by phase.
 
 ## Health
