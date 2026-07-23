@@ -225,7 +225,7 @@ class EnrollmentCompleteRequest(BaseModel):
     audio_ref: str = Field(min_length=1)
     duration_ms: int = Field(ge=1)
     mime_type: str = Field(default="audio/webm", min_length=1)
-    face_image_ref: str | None = None
+    face_image_ref: str = Field(min_length=1)
     consent_accepted: bool
 
 

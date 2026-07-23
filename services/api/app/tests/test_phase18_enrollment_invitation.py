@@ -10,12 +10,13 @@ from app.api.v1.families import (
     confirm_enrollment_phone_verification,
     create_enrollment_invitation,
     create_family,
+    list_enrollment_invitations,
     resend_enrollment_invitation,
     resolve_enrollment_invitation,
     send_enrollment_phone_verification,
 )
 from app.core.database import Base, SessionLocal, engine
-from app.models import EnrollmentInvitation, FaceProfile, FamilyMember, VoiceProfile
+from app.models import AuditLog, EnrollmentInvitation, FaceProfile, FamilyMember, VoiceProfile
 from app.schemas import (
     DeviceVerificationConfirmRequest,
     DeviceVerificationRequest,
@@ -93,7 +94,12 @@ def test_token_resolves_and_completion_is_persisted() -> None:
     assert member.approval_status == "REVIEW_REQUIRED"
     assert member.trust_level == "B"
     assert db.query(VoiceProfile).filter_by(family_member_id=member_id, status="ENROLLED").count() == 1
+    assert db.query(VoiceProfile).filter_by(family_member_id=member_id).one().consent_id is None
     assert db.query(FaceProfile).filter_by(family_member_id=member_id, status="ACTIVE").count() == 1
+    assert db.query(AuditLog).filter_by(
+        action="ENROLLMENT_CONSENT_ACCEPTED",
+        resource_id=invitation_id,
+    ).count() == 1
     db.close()
 
 
@@ -110,6 +116,7 @@ def test_expired_token_cannot_complete_enrollment() -> None:
             EnrollmentCompleteRequest(
                 audio_ref="sample.wav",
                 duration_ms=1000,
+                face_image_ref="dev-local://face.jpg",
                 consent_accepted=True,
             ),
             db,
@@ -136,12 +143,31 @@ def test_resend_invalidates_old_token_and_returns_new_development_link() -> None
     db.close()
 
 
+def test_repeated_create_reuses_pending_invitation_for_same_family_member() -> None:
+    old_token, invitation_id, member_id = _invitation()
+    db = SessionLocal()
+    invitation = db.get(EnrollmentInvitation, invitation_id)
+
+    recreated = create_enrollment_invitation(invitation.family_id, member_id, db)
+    new_token = parse_qs(urlparse(recreated.enrollment_url or "").query)["token"][0]
+
+    assert recreated.id == invitation_id
+    assert new_token != old_token
+    assert db.query(EnrollmentInvitation).filter_by(family_member_id=member_id).count() == 1
+    assert len(list_enrollment_invitations(invitation.family_id, db)) == 1
+    with pytest.raises(HTTPException) as old_link:
+        resolve_enrollment_invitation(old_token, db)
+    assert old_link.value.status_code == 404
+    db.close()
+
+
 def test_completing_same_invitation_twice_does_not_duplicate_profiles() -> None:
     token, _, member_id = _invitation()
     db = SessionLocal()
     request = EnrollmentCompleteRequest(
         audio_ref="sample.wav",
         duration_ms=15000,
+        face_image_ref="dev-local://face.jpg",
         consent_accepted=True,
     )
     _verify_invited_phone(token, db)
@@ -169,6 +195,7 @@ def test_invited_family_phone_must_match_before_completion() -> None:
             EnrollmentCompleteRequest(
                 audio_ref="sample.wav",
                 duration_ms=1000,
+                face_image_ref="dev-local://face.jpg",
                 consent_accepted=True,
             ),
             db,

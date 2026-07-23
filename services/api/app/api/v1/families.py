@@ -8,7 +8,7 @@ from sqlalchemy import or_, select
 from app.api.deps import DbSession
 from app.core.config import get_settings
 from app.core.security import hash_phone_number, hash_verification_code, normalize_phone_number, phone_last4
-from app.models import AuditLog, EnrollmentInvitation, FaceProfile, Family, FamilyMember, Guardian, PhoneVerification, SafeWord, Senior
+from app.models import AuditLog, EnrollmentInvitation, FaceProfile, Family, FamilyMember, Guardian, PhoneVerification, SafeWord, Senior, VoiceProfile
 from app.schemas import (
     FamilyCreate,
     FamilyMemberCreate,
@@ -283,18 +283,31 @@ def create_enrollment_invitation(
         raise HTTPException(status_code=400, detail="unsupported enrollment channel")
     delivery = get_enrollment_delivery_provider().prepare(token)
     now = datetime.now(timezone.utc)
-    invitation = EnrollmentInvitation(
-        family_id=family_id,
-        family_member_id=member_id,
-        channel=delivery.channel if channel == "LINK" else channel,
-        status="PENDING",
-        token_hash=hashlib.sha256(token.encode()).hexdigest(),
-        sent_at=now,
-        expires_at=now + (timedelta(minutes=5) if channel == "QR" else timedelta(days=3)),
+    invitation = db.scalar(
+        select(EnrollmentInvitation)
+        .where(
+            EnrollmentInvitation.family_id == family_id,
+            EnrollmentInvitation.family_member_id == member_id,
+            EnrollmentInvitation.status != "COMPLETED",
+        )
+        .order_by(EnrollmentInvitation.created_at.desc())
+        .limit(1)
     )
+    if invitation is None:
+        invitation = EnrollmentInvitation(
+            family_id=family_id,
+            family_member_id=member_id,
+        )
+        db.add(invitation)
+    invitation.channel = delivery.channel if channel == "LINK" else channel
+    invitation.status = "PENDING"
+    invitation.token_hash = hashlib.sha256(token.encode()).hexdigest()
+    invitation.sent_at = now
+    invitation.expires_at = now + (timedelta(minutes=5) if channel == "QR" else timedelta(days=3))
+    invitation.phone_verified_at = None
+    invitation.used_at = None
     member.approval_status = "INVITED"
     member.is_verified = False
-    db.add(invitation)
     db.flush()
     enrollment_url = (
         f"/soricall/enroll?qr_invitation_id={invitation.id}&qr_nonce={token}"
@@ -308,9 +321,20 @@ def create_enrollment_invitation(
 
 @router.get("/{family_id}/enrollment-invitations", response_model=list[EnrollmentInvitationResponse])
 def list_enrollment_invitations(family_id: str, db: DbSession) -> list[EnrollmentInvitationResponse]:
-    invitations = list(db.scalars(select(EnrollmentInvitation).where(EnrollmentInvitation.family_id == family_id).order_by(EnrollmentInvitation.created_at)))
+    invitations = list(db.scalars(
+        select(EnrollmentInvitation)
+        .where(EnrollmentInvitation.family_id == family_id)
+        .order_by(EnrollmentInvitation.created_at.desc())
+    ))
+    latest_by_member: dict[str, EnrollmentInvitation] = {}
+    for invitation in invitations:
+        latest_by_member.setdefault(invitation.family_member_id, invitation)
     members = {member.id: member for member in db.scalars(select(FamilyMember).where(FamilyMember.family_id == family_id))}
-    return [_invitation_response(invitation, members[invitation.family_member_id]) for invitation in invitations if invitation.family_member_id in members]
+    return [
+        _invitation_response(invitation, members[invitation.family_member_id])
+        for invitation in latest_by_member.values()
+        if invitation.family_member_id in members
+    ]
 
 
 @router.post("/{family_id}/enrollment-invitations/{invitation_id}/resend", response_model=EnrollmentInvitationResponse)
@@ -445,6 +469,33 @@ def send_enrollment_phone_verification(
     )
 
 
+@enrollment_router.post("/phone-check", response_model=EnrollmentInvitationResponse)
+def check_enrollment_phone(
+    token: str,
+    request: DeviceVerificationRequest,
+    db: DbSession,
+    qr_invitation_id: str | None = None,
+) -> EnrollmentInvitationResponse:
+    invitation, member = _invitation_for_token(token, db, qr_invitation_id=qr_invitation_id)
+    if invitation.status == "EXPIRED":
+        raise HTTPException(status_code=410, detail="invitation expired")
+    if invitation.channel == "QR" and not invitation.device_verified_at:
+        raise HTTPException(status_code=403, detail="QR device verification required")
+    if hash_phone_number(request.phone_number) != member.phone_number_hash:
+        raise HTTPException(status_code=400, detail="phone number does not match invited family member")
+    invitation.phone_verified_at = datetime.now(timezone.utc)
+    db.add(AuditLog(
+        actor_user_id=current_user_id.get(),
+        action="ENROLLMENT_PHONE_MATCHED",
+        resource_type="ENROLLMENT_INVITATION",
+        resource_id=invitation.id,
+        metadata_json=f'{{"family_member_id":"{member.id}"}}',
+    ))
+    db.commit()
+    db.refresh(invitation)
+    return _invitation_response(invitation, member)
+
+
 @enrollment_router.post("/phone-verification/confirm", response_model=EnrollmentInvitationResponse)
 def confirm_enrollment_phone_verification(
     token: str,
@@ -516,29 +567,49 @@ def complete_enrollment_invitation(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    profile = voice_service.create_profile(
-        family_member_id=member.id,
-        display_name=member.name,
-        consent_id=invitation.id,
+    profile = db.scalar(
+        select(VoiceProfile)
+        .where(VoiceProfile.family_member_id == member.id, VoiceProfile.status != "DELETED")
+        .order_by(VoiceProfile.created_at.desc())
+        .limit(1)
     )
-    voice_service.add_sample(
-        voice_profile_id=profile.id,
-        audio_ref=request.audio_ref,
-        object_key=None,
-        duration_ms=request.duration_ms,
-        sample_rate=None,
-        mime_type=request.mime_type,
-        purpose="ENROLLMENT",
-    )
-    voice_service.enroll(voice_profile_id=profile.id, audio_ref=request.audio_ref)
-    if request.face_image_ref:
-        from app.api.v1.face_video import _validate_face_image
-        from app.core.config import get_settings
-
+    if profile is None:
+        # Public invitees may not have a User row, so ConsentLog cannot own
+        # their consent. The invitation audit below is the consent evidence.
+        profile = voice_service.create_profile(
+            family_member_id=member.id,
+            display_name=member.name,
+            consent_id=None,
+        )
+    if profile.status != "ENROLLED":
         try:
-            content_hash, size_bytes, validation_status = _validate_face_image(request.face_image_ref)
+            voice_service.add_sample(
+                voice_profile_id=profile.id,
+                audio_ref=request.audio_ref,
+                object_key=None,
+                duration_ms=request.duration_ms,
+                sample_rate=None,
+                mime_type=request.mime_type,
+                purpose="ENROLLMENT",
+            )
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            if str(exc) != "duplicate voice sample":
+                raise
+        voice_service.enroll(voice_profile_id=profile.id, audio_ref=request.audio_ref)
+    from app.api.v1.face_video import _validate_face_image
+    from app.core.config import get_settings
+
+    try:
+        content_hash, size_bytes, validation_status = _validate_face_image(request.face_image_ref)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    face_profile = db.scalar(
+        select(FaceProfile.id).where(
+            FaceProfile.family_member_id == member.id,
+            FaceProfile.status == "ACTIVE",
+        ).limit(1)
+    )
+    if not face_profile:
         db.add(FaceProfile(
             family_member_id=member.id,
             display_name=member.name,
@@ -552,6 +623,13 @@ def complete_enrollment_invitation(
             validation_status=validation_status,
             consented_at=datetime.now(timezone.utc),
         ))
+    db.add(AuditLog(
+        actor_user_id=current_user_id.get(),
+        action="ENROLLMENT_CONSENT_ACCEPTED",
+        resource_type="ENROLLMENT_INVITATION",
+        resource_id=invitation.id,
+        metadata_json=f'{{"family_member_id":"{member.id}","voice":true,"face":true}}',
+    ))
     invitation.status = "COMPLETED"
     invitation.used_at = datetime.now(timezone.utc)
     invitation.completed_at = datetime.now(timezone.utc)

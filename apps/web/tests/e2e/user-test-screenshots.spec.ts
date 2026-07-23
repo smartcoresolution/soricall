@@ -81,10 +81,10 @@ test("사용자 테스트용 전체 화면 이미지", async ({ page }) => {
   await shot("10-registration-plan");
   await page.getByRole("button", { name: "다음: 등록 요청 보내기" }).click();
   await shot("11-invitation-methods");
-  await page.getByRole("button", { name: "안전한 링크 보내기" }).click();
+  await page.getByRole("button", { name: "문자 앱으로 보내기" }).click();
   await expect(page.getByRole("heading", { name: "가족 등록 현황" })).toBeVisible();
   await shot("12-enrollment-status");
-  await page.getByRole("button", { name: "안심 홈으로 이동" }).click();
+  await page.getByRole("button", { name: "홈", exact: true }).click();
   await shot("13-home-dashboard");
   await page.getByText("등록된 가족 전화", { exact: true }).click();
   await shot("14-safe-call");
